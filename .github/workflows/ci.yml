@@ -16,6 +16,7 @@ jobs:
   quality:
     name: quality (${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -86,6 +87,7 @@ jobs:
   security:
     name: security
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,6 +116,7 @@ jobs:
   actionlint:
     name: actionlint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # v1.7.12 is the version AGENTS.md blesses for `npm run lint:actions`:
@@ -136,6 +139,7 @@ jobs:
   trivy:
     name: trivy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # NOT a required check, deliberately: the vulnerability database this
     # scanner reads is a moving target, so a database update can turn a
     # green pull request red without a line of this repository changing.
@@ -161,6 +165,7 @@ jobs:
   semgrep:
     name: semgrep
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # NOT a required check, for the same reason as the trivy job above,
     # and one more: `--config auto` reads semgrep's rule registry, which is
     # upstream-mutable. A merge floor that depends on a rule set the
@@ -196,6 +201,7 @@ jobs:
   docker:
     name: docker
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Same tree-identity argument as the second quality leg: the image a
     # squash-merged commit would build is the image the pull_request run
     # already built and smoke-tested. The release workflow builds and
