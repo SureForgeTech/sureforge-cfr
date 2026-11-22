@@ -1112,19 +1112,6 @@ export class Store {
   }
 
   /**
-   * How many rows the whole store holds, every title included.
-   *
-   * The export path uses this: a snapshot copy carries EVERY title's rows,
-   * so the count it reports must be the count of what it wrote, not one
-   * title's slice.
-   */
-  countAllSections(): number {
-    const row = this.stmt('SELECT count(*) AS n FROM sections').get() as
-      Record<string, unknown> | undefined;
-    return row ? Number(row['n'] ?? 0) : 0;
-  }
-
-  /**
    * How many rows the whole store holds, and every title it holds, in ONE
    * statement.
    *
