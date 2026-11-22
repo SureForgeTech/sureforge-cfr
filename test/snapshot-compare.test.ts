@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
+import { formatSnapshotComparison } from '../src/commands/compare.js';
 import { ServiceError } from '../src/core/errors.js';
 import { compareSnapshots, SNAPSHOT_RESPONSE_CHAR_BUDGET } from '../src/core/snapshot-compare.js';
 import { Store } from '../src/core/store.js';
@@ -333,6 +334,79 @@ describe('compareSnapshots', () => {
       // The changed list spent a few characters of its OWN share and kept its
       // entry: a shared pool would spend the pool on the added list.
       expect(result.changed.map((change) => change.citation)).toEqual(['4.1']);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('says where a retitle beyond the heading bound is', () => {
+    const fixture = snapshotDir();
+    try {
+      // Two headings that share their first 1,000 characters and differ
+      // after them: both clip to the SAME string, so the pair on the wire
+      // shows nothing. The retitle is still true, and the CLI says where
+      // the difference is.
+      const shared = `Heading ${'x'.repeat(1_100)}`;
+      const from = path.join(fixture.dir, 'from.sqlite');
+      const to = path.join(fixture.dir, 'to.sqlite');
+      writeSnapshot(
+        from,
+        [makeSection({ citation: '4.1', heading: `${shared} FROM`, text: 'Body.' })],
+        FROM_DATE,
+      );
+      writeSnapshot(
+        to,
+        [makeSection({ citation: '4.1', heading: `${shared} TO`, text: 'Body.' })],
+        TO_DATE,
+      );
+
+      const comparison = compareSnapshots({ logger: createTestLogger() }, from, to);
+      const change = comparison.changed[0];
+      expect(change?.headingChanged).toBe(true);
+      // The bound holds, and the pair is identical — the case the wire has
+      // to account for.
+      expect(change?.heading.length).toBe(1_001);
+      expect(change?.heading).toBe(change?.previousHeading);
+
+      // The CLI does not print the same string twice and say nothing.
+      expect(formatSnapshotComparison(comparison)).toContain(
+        'the retitle lies beyond the heading bound',
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('treats a heading of exactly the bound as marked', () => {
+    const fixture = snapshotDir();
+    try {
+      // The boundary: one heading is exactly the bound and the other is one
+      // character longer, sharing that bound. The marking is UNIFORM, so the
+      // pair is identical and the CLI says where the difference is — a
+      // heading left unmarked at the bound would differ from a marked one by
+      // the ellipsis alone, which says nothing.
+      const shared = 'x'.repeat(1_000);
+      const from = path.join(fixture.dir, 'from.sqlite');
+      const to = path.join(fixture.dir, 'to.sqlite');
+      writeSnapshot(
+        from,
+        [makeSection({ citation: '4.1', heading: shared, text: 'Body.' })],
+        FROM_DATE,
+      );
+      writeSnapshot(
+        to,
+        [makeSection({ citation: '4.1', heading: `${shared}B`, text: 'Body.' })],
+        TO_DATE,
+      );
+
+      const comparison = compareSnapshots({ logger: createTestLogger() }, from, to);
+      const change = comparison.changed[0];
+      expect(change?.headingChanged).toBe(true);
+      expect(change?.heading).toBe(change?.previousHeading);
+      expect(change?.heading.length).toBe(1_001);
+      expect(formatSnapshotComparison(comparison)).toContain(
+        'the retitle lies beyond the heading bound',
+      );
     } finally {
       fixture.cleanup();
     }

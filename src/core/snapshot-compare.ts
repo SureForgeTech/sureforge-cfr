@@ -91,11 +91,23 @@ export const SUMMARY_MAX_LINES = 500;
  * carry. (An entry can still exceed a category share — the corpus does not
  * bound a citation or a hierarchy path either.)
  */
-const HEADING_CHARS = 1_000;
+export const HEADING_CHARS = 1_000;
 
-/** Clip a heading at the bound; a cut heading is marked with an ellipsis. */
+/**
+ * Clip a heading at the bound; a heading at or over the bound is marked with
+ * an ellipsis.
+ *
+ * The cut is UNIFORM: a heading of {@link HEADING_CHARS} characters is
+ * marked too, not kept unmarked. That matters because two headings that
+ * share their first {@link HEADING_CHARS} characters must clip to the SAME
+ * string — with a uniform cut they do, so "the two clipped headings are
+ * identical" means exactly one thing: the retitle's difference lies beyond
+ * the bound. (A heading of exactly the bound left unmarked would clip
+ * differently from a longer one and the pair would differ by the ellipsis
+ * alone, which says nothing about where the retitle is.)
+ */
 function clipHeading(heading: string): string {
-  return heading.length <= HEADING_CHARS ? heading : `${heading.slice(0, HEADING_CHARS)}…`;
+  return heading.length < HEADING_CHARS ? heading : `${heading.slice(0, HEADING_CHARS)}…`;
 }
 
 /** One side of the comparison: the file and the issue date it records. */
@@ -124,11 +136,24 @@ export interface ChangeSummary {
 export interface SnapshotChange {
   readonly citation: string;
   readonly kind: 'section' | 'appendix';
-  /** The heading at the to-side (the only side for an added provision). */
+  /**
+   * The heading at the to-side (the only side for an added provision),
+   * bounded at {@link HEADING_CHARS} characters — a heading of that length or
+   * more is marked with an ellipsis.
+   */
   readonly heading: string;
-  /** True when the heading differs across the two snapshots (a retitle). */
+  /**
+   * True when the heading differs across the two snapshots (a retitle).
+   *
+   * Decided on the RAW headings, so it stays true when the difference lies
+   * beyond the heading bound and the two clipped headings are identical.
+   */
   readonly headingChanged: boolean;
-  /** The from-side heading when `headingChanged`, else null. */
+  /**
+   * The from-side heading when `headingChanged`, else null. Bounded like
+   * {@link heading}, and therefore identical to it when the difference lies
+   * beyond the bound.
+   */
   readonly previousHeading: string | null;
   /** The authority hierarchy the provision sits in (to-side; from-side for a removal). */
   readonly chapter: string | null;

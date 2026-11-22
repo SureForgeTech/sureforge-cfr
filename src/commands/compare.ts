@@ -1,6 +1,7 @@
 import type { Logger } from '../logger.js';
 import {
   compareSnapshots,
+  HEADING_CHARS,
   SNAPSHOT_CHANGE_CAP,
   SNAPSHOT_RESPONSE_CHAR_BUDGET,
   type ChangeSummary,
@@ -53,10 +54,27 @@ function formatSummary(summary: ChangeSummary): string[] {
   return lines;
 }
 
+/**
+ * A retitled provision's heading line.
+ *
+ * A retitle whose difference lies beyond the heading bound clips both sides
+ * to the SAME characters, so printing them side by side would show the same
+ * string twice and say nothing. The line says where the difference is.
+ */
+function formatRetitle(change: SnapshotChange): string {
+  const previous = change.previousHeading ?? 'unknown';
+  if (previous === change.heading) {
+    const bound = HEADING_CHARS.toLocaleString('en-US');
+    return (
+      `${change.heading} (previously: the same first ${bound} characters — ` +
+      'the retitle lies beyond the heading bound)'
+    );
+  }
+  return `${change.heading} (previously: ${previous})`;
+}
+
 function formatChange(change: SnapshotChange): string[] {
-  const heading = change.headingChanged
-    ? `${change.heading} (previously: ${change.previousHeading ?? 'unknown'})`
-    : change.heading;
+  const heading = change.headingChanged ? formatRetitle(change) : change.heading;
   const hierarchy = [
     change.chapter === null ? null : `chapter ${change.chapter}`,
     change.part === null ? null : `part ${change.part}`,
