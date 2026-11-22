@@ -209,6 +209,27 @@ describe('export command', () => {
     }
   });
 
+  it('reports the titles it covered in every format', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.1', text: 'Title 38 body.' }),
+        makeSection({ title: 12, citation: '1026.1', text: 'Title 12 body.' }),
+      ],
+      issueDate: '2026-01-01',
+    });
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
+      for (const format of ['md', 'jsonl', undefined] as const) {
+        const target = path.join(temp.dir, `dump-${format ?? 'sqlite'}`);
+        const report = runExportCommand(config, target, createTestLogger(), format);
+        expect(report.titles, format).toEqual([12, 38]);
+        expect(report.provisions, format).toBe(2);
+      }
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('md export names every title the document holds, with each title’s own date', () => {
     const temp = openTempStore({ seed: false });
     const target = path.join(temp.dir, 'multi.md');
@@ -233,6 +254,9 @@ describe('export command', () => {
       const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
       const report = runExportCommand(config, target, createTestLogger(), 'md');
       expect(report.provisions).toBe(2);
+      // The report carries the titles the export covered, in every format:
+      // an export of a multi-title index is not an export of one title.
+      expect(report.titles).toEqual([12, 38]);
 
       const content = readFileSync(target, 'utf8');
       // The header names BOTH titles and BOTH dates: a document that holds
