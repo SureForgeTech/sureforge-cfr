@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -114,12 +115,25 @@ describe('mcp-install', () => {
   // substitute `node:fs` because the ordering and the failure are not
   // otherwise observable from a passing command.
   it.skipIf(process.platform === 'win32')(
-    'flushes the directory entry after the rename',
+    'flushes the destination directory after the rename',
     async () => {
       const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dirsync-'));
       try {
-        const target = path.join(tempDir, 'mcp.json');
-        writeFileSync(target, '{"mcpServers":{}}\n', 'utf8');
+        // The config is a link whose target sits in a sibling directory, so
+        // syncing the LINK's directory instead of the target's is visible in
+        // the recorded events.
+        const tracked = path.join(tempDir, 'tracked');
+        const clientDir = path.join(tempDir, 'client');
+        mkdirSync(tracked, { recursive: true });
+        mkdirSync(clientDir);
+        const realConfig = path.join(tracked, 'mcp.json');
+        writeFileSync(realConfig, '{"mcpServers":{}}\n', 'utf8');
+        const target = path.join(clientDir, 'mcp.json');
+        symlinkSync('../tracked/mcp.json', target);
+        // The code canonicalizes the link's directory, so compare the real
+        // path: on macOS `mkdtemp` hands out `/var/...`, whose real form is
+        // `/private/var/...`.
+        const trackedReal = realpathSync(tracked);
         const events: string[] = [];
 
         vi.resetModules();
@@ -134,7 +148,12 @@ describe('mcp-install', () => {
               mode?: Parameters<typeof actual.openSync>[2],
             ): number => {
               const fd = actual.openSync(file, flags, mode);
-              const label = flags === 'r' && file === tempDir ? 'directory' : 'temp';
+              const label =
+                flags === 'r' && file === trackedReal
+                  ? 'directory'
+                  : flags === 'r'
+                    ? 'wrong-directory'
+                    : 'temp';
               opened.set(fd, label);
               events.push(`open:${label}`);
               return fd;
@@ -168,6 +187,7 @@ describe('mcp-install', () => {
         expect(events.indexOf('write')).toBeLessThan(events.indexOf('fsync:temp'));
         expect(events[events.indexOf('rename') - 1]).toBe('fsync:temp');
         expect(events.slice(events.indexOf('rename') + 1)).toContain('fsync:directory');
+        expect(events).not.toContain('open:wrong-directory');
       } finally {
         vi.doUnmock('node:fs');
         vi.resetModules();
@@ -479,9 +499,53 @@ describe('mcp-install', () => {
         // message keeps a revert detectable without pinning the wording.
         expect(caught).toBeInstanceOf(Error);
         expect((caught as NodeJS.ErrnoException).code).toBeUndefined();
+        // A plain Error is exit 1; `CommandError` carries `exitCode` and would
+        // turn this into exit 5, which README reserves for an unparseable
+        // config. Neither the class nor the field may appear.
+        expect(caught).not.toBeInstanceOf(CommandError);
+        expect((caught as { exitCode?: number }).exitCode).toBeUndefined();
         chmodSync(target, 0o644);
         expect(readFileSync(target, 'utf8')).toBe(original);
       } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps the original config when the rename fails',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-rename-fail-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const original = '{"mcpServers":{"existing":{"command":"x"}}}\n';
+        writeFileSync(target, original, 'utf8');
+
+        // The rename is the one step that publishes the new file, so a
+        // version that cleared the destination first would lose the config
+        // here — which is the data loss this function exists to prevent.
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          return {
+            ...actual,
+            renameSync: (): void => {
+              const error = new Error(
+                'ENOSPC: no space left on device, rename',
+              ) as NodeJS.ErrnoException;
+              error.code = 'ENOSPC';
+              throw error;
+            },
+          };
+        });
+        const mocked = await import('../src/commands/mcp-install.js');
+
+        expect(() => mocked.installClientConfig('cursor', target)).toThrow(/ENOSPC/);
+        expect(readFileSync(target, 'utf8')).toBe(original);
+        expect(readdirSync(tempDir)).toEqual(['mcp.json']);
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
         rmSync(tempDir, { recursive: true, force: true });
       }
     },
