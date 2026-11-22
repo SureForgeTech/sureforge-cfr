@@ -1125,18 +1125,20 @@ export class Store {
   }
 
   /**
-   * Every CFR title the store holds rows for, ascending.
+   * How many rows the whole store holds, and every title it holds, in ONE
+   * statement.
    *
    * The export path uses this: an export carries EVERY title's rows, so the
-   * report that names the export must name the titles it covered — an export
-   * of a multi-title index is not an export of one title.
+   * report that describes it must name the titles and the count of the SAME
+   * revision — and two statements could straddle a concurrent sync.
    */
-  storedTitles(): number[] {
-    const rows = this.stmt('SELECT DISTINCT title FROM sections ORDER BY title').all() as Record<
-      string,
-      unknown
-    >[];
-    return rows.map((row) => Number(row['title']));
+  storeSummary(): { readonly provisions: number; readonly titles: number[] } {
+    const rows = this.stmt(
+      'SELECT title, count(*) AS n FROM sections GROUP BY title ORDER BY title',
+    ).all() as Record<string, unknown>[];
+    const titles = rows.map((row) => Number(row['title']));
+    const provisions = rows.reduce((sum, row) => sum + Number(row['n'] ?? 0), 0);
+    return { provisions, titles };
   }
 
   /**

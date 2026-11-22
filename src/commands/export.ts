@@ -57,7 +57,8 @@ function toJsonlLine(row: SectionRow): string {
 
 /**
  * Write every provision as JSONL (compact lines, one object per line,
- * trailing newline at EOF) and return the row count.
+ * trailing newline at EOF) and return the row count with the titles those
+ * rows carry.
  *
  * Chunk array + ONE `writeFileSync`, deliberately over a write stream: at
  * Title 38 scale the whole document is ~20 MB (measured: 2 970 rows,
@@ -143,9 +144,10 @@ function markdownHeader(store: Store, rows: readonly SectionRow[]): string {
 /**
  * What an export wrote: how many provisions, and the titles they came from.
  *
- * The two come from the SAME read, so the report describes the artifact that
- * was written: a concurrent sync cannot make the count and the title list
- * disagree.
+ * The JSONL and Markdown writers report both from the SAME read — the rows
+ * they wrote — so the report describes the artifact exactly. The snapshot
+ * path copies the whole file and reports the store's own count and titles
+ * from ONE statement, read where its count always was.
  */
 interface ExportContents {
   readonly provisions: number;
@@ -298,8 +300,8 @@ export function runExportCommand(
     if (format === undefined) {
       snapshotExclusive(store, target);
       // The snapshot copies the WHOLE file, so its provisions and its titles
-      // are the store's — read after the copy, as the count always was.
-      contents = { provisions: store.countAllSections(), titles: store.storedTitles() };
+      // are the store's — read in ONE statement, where its count always was.
+      contents = store.storeSummary();
     } else if (format === 'jsonl') {
       contents = writeJsonl(store, target);
     } else {

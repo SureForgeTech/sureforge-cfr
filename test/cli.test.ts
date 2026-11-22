@@ -439,13 +439,20 @@ describe('main', () => {
 
   it('keeps a single-title export line exactly as it was', async () => {
     const temp = openTempStore({ issueDate: '2026-01-01' });
-    const target = path.join(temp.dir, 'dump.md');
     try {
-      const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
-      const code = await main(['export', target, 'md'], io);
-      expect(code).toBe(EXIT.OK);
-      // A pipeline may parse this line: a single-title export keeps it.
-      expect(out.join('')).toMatch(/^exported \d+ provisions as md \(\d+ bytes\) to /);
+      for (const format of ['md', 'jsonl', undefined] as const) {
+        const target = path.join(temp.dir, `single-${format ?? 'sqlite'}`);
+        const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
+        const code = await main(
+          format === undefined ? ['export', target] : ['export', target, format],
+          io,
+        );
+        expect(code, format).toBe(EXIT.OK);
+        // A pipeline may parse this line: a single-title export keeps it.
+        expect(out.join(''), format).toMatch(
+          new RegExp(`^exported \\d+ provisions as ${format ?? 'sqlite'} \\(\\d+ bytes\\) to `),
+        );
+      }
     } finally {
       temp.cleanup();
     }
