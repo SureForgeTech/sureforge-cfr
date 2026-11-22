@@ -222,6 +222,9 @@ describe('Titan HTTP API', () => {
     const canonical = await get('/api/v1/search?q=rating+schedule&part=4');
     const padded = await get('/api/v1/search?q=rating+schedule&part=04');
     expect(padded.status).toBe(200);
+    // The canonical side must hold something, or "the same" would hold
+    // vacuously.
+    expect(canonical.body['total']).toBeGreaterThan(0);
     expect(padded.body['total']).toBe(canonical.body['total']);
     expect((padded.body['hits'] as Array<{ citation: string }>).map((hit) => hit.citation)).toEqual(
       (canonical.body['hits'] as Array<{ citation: string }>).map((hit) => hit.citation),
