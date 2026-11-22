@@ -27,7 +27,24 @@ Windsurf, VS Code) — the installer merges its entry into an existing client
 config and never rewrites one it cannot parse, because those files are the
 user's and may hold comments or another server's settings (an unparseable or
 non-object file is refused with exit 5, the same code `export` uses for a
-destructive write it declines) — `cfr-free vibe rules` and `cfr-free vibe prompt` for
+destructive write it declines). It replaces the file in one step — a
+sibling temporary file renamed into place — so an interrupted or failed write
+leaves the user's config as it was instead of half-written: the new content
+is flushed to the disk before the rename, and the directory entry after it
+where the platform supports that (on Windows the entry is not synced), so a
+power cut cannot leave a config that is neither the old one nor the complete
+new one. It writes through a symlinked config — including one whose target
+does not exist yet, as long as the target's directory does — rather than
+replacing the link, so a dotfiles setup keeps it. A config that is read-only
+is left alone and the write fails, as it did before. Replacing the file in one
+step is a DIRECTORY operation, so it needs write permission on the config's
+directory as well as on the file: a writable config inside a read-only
+directory now fails where the in-place write would have succeeded — the trade
+for never showing a half-written file — and the config and its directory are
+left as they were. The inode is replaced too, so the content and mode are
+preserved and hardlinks to the old file, extended attributes and ownership do
+not carry over;
+`cfr-free vibe rules` and `cfr-free vibe prompt` for
 pre-packaged agent system rules and claim evaluation workflows,
 `cfr-free vibe ui` for copy-paste Tailwind and React components (v0, Lovable, Cursor),
 `cfr-free vibe combine` and `/api/v1/vibe/combine` for 38 C.F.R. § 4.25 VA Math

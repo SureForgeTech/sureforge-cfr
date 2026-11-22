@@ -1,4 +1,20 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  accessSync,
+  chmodSync,
+  closeSync,
+  constants,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { CommandError, EXIT } from '../exit-codes.js';
@@ -196,14 +212,212 @@ export function installClientConfig(
   mcpServers['cfr-free'] = MCP_ENTRY;
   config['mcpServers'] = mcpServers;
 
+  const mode = isCreated ? undefined : writableMode(targetPath);
   const parentDir = path.dirname(targetPath);
   mkdirSync(parentDir, { recursive: true });
-  writeFileSync(targetPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  writeConfigAtomically(targetPath, JSON.stringify(config, null, 2) + '\n', mode);
 
   return {
     updated: true,
     status: isCreated ? 'created' : 'updated',
   };
+}
+
+/**
+ * The permission bits of a config that is already there, refusing one this
+ * process may not write.
+ *
+ * Two facts live here. `rename` REPLACES the target, and the replacement's
+ * mode is the one that survives — so the original bits are carried over and
+ * the installer's effect on a file it updates stays what it was. And a
+ * rename needs write permission on the DIRECTORY, not on the file, so an
+ * atomic write would silently replace a config the user had made read-only;
+ * the explicit check keeps the old outcome (an error, file intact) for that
+ * case instead of silently succeeding.
+ *
+ * @throws {Error} when the existing file is not writable (exit 1, as the
+ *   in-place write did).
+ */
+function writableMode(targetPath: string): number | undefined {
+  let mode: number;
+  try {
+    mode = statSync(targetPath).mode & 0o777;
+    accessSync(targetPath, constants.W_OK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    // A plain Error, not a CommandError: the file is readable but not
+    // writable, so this is the same "write failed" outcome the in-place
+    // write used to produce (exit 1), not the exit-5 refusal for a config
+    // that cannot be understood.
+    throw new Error(
+      `cannot write ${targetPath} — the config is read-only; fix its permissions or remove it first`,
+      { cause: error },
+    );
+  }
+  return mode;
+}
+
+/**
+ * Replace `targetPath` with `contents` in one step.
+ *
+ * A bare `writeFileSync` truncates the target before it writes, so a crash,
+ * a full disk or a killed process leaves the reader with a half-written
+ * client config — and this command refuses to rewrite a config it cannot
+ * parse, so a torn write would leave a file it will not repair. Writing a
+ * sibling temp file, fsync-ing it and renaming it into place is atomic on the
+ * same filesystem: the config is either untouched or fully replaced, and the
+ * bytes the rename publishes are already on the disk.
+ *
+ * The rename is a DIRECTORY operation, so replacing the file needs write
+ * permission on its directory even when the file itself is writable; that is
+ * stated in SPEC, because the old in-place write did not need it. The
+ * directory is synced after the rename for the same reason the file is
+ * synced before it: the entry must reach the disk too.
+ *
+ * `flag: 'wx'` REFUSES an existing temp path rather than opening it. Without
+ * that, a pre-created symlink at the predictable temp name would redirect
+ * the write to whatever it points at. The temp name carries the pid so two
+ * concurrent runs do not collide, and nothing is removed unless this call
+ * created it.
+ *
+ * A target that is a SYMLINK is written through to the file it points at:
+ * the in-place write followed the link, and users keep these configs in
+ * dotfiles repositories. Renaming onto the link would replace it with a
+ * regular file and quietly detach the config from wherever it is tracked.
+ */
+function writeConfigAtomically(
+  targetPath: string,
+  contents: string,
+  mode: number | undefined,
+): void {
+  const destination = resolveWriteTarget(targetPath);
+  const tempPath = `${destination}.${process.pid}.cfr-free.tmp`;
+  // `openSync` with 'wx' is what makes the temp file OURS: it either creates
+  // a brand-new entry or throws. Only a file this call created is removed
+  // on the way out, so an existing temp (or a symlink squatting on the
+  // name) is never deleted or written through.
+  let fd: number | undefined;
+  let created = false;
+  try {
+    fd = openSync(tempPath, 'wx', mode ?? 0o666);
+    created = true;
+    writeFileSync(fd, contents, 'utf8');
+    // Get the bytes onto the disk BEFORE the rename publishes the name: a
+    // rename that commits ahead of its data leaves a power-cut reader with an
+    // empty or partial config, which is the failure this function exists to
+    // prevent. One extra fsync for a command that runs once per setup.
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    // `mode` at creation is masked by the process umask, so an existing
+    // 0664 config would come back 0644. Set the bits explicitly instead.
+    if (mode !== undefined) chmodSync(tempPath, mode);
+    renameSync(tempPath, destination);
+    // The rename publishes the NAME, and that is a directory change: syncing
+    // the file's bytes does not make the entry durable, so a power cut after
+    // a successful install could still lose the config. Best effort — the
+    // bytes are already in place, so a directory that cannot be opened or
+    // synced (Windows cannot open a directory at all) must not turn a
+    // completed write into a failed command.
+    syncDirectory(path.dirname(destination));
+  } catch (error) {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // The original error is the one worth reporting.
+      }
+    }
+    // `created` is set as soon as `openSync` returns, so a write that fails
+    // part-way (ENOSPC, EIO, EDQUOT) still leaves nothing behind — and a
+    // temp path this call did not create (EEXIST) is never removed.
+    if (created) rmSync(tempPath, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * Ask the operating system to flush a directory's entries, so a name that a
+ * rename just published survives a power cut. Best effort by design: this is
+ * a durability improvement, not a precondition, and the caller has already
+ * written every byte it promised.
+ */
+function syncDirectory(directory: string): void {
+  if (process.platform === 'win32') return;
+  let dirFd: number | undefined;
+  try {
+    dirFd = openSync(directory, 'r');
+    fsyncSync(dirFd);
+  } catch {
+    // An unopenable or unsyncable directory (a network filesystem, a host
+    // that refuses directory sync) does not invalidate the write.
+  } finally {
+    if (dirFd !== undefined) {
+      try {
+        closeSync(dirFd);
+      } catch {
+        // Nothing left to report: the config is in place.
+      }
+    }
+  }
+}
+
+/**
+ * The path a rename should target: the file at the end of a chain of
+ * symlinks, whether or not that file exists yet.
+ *
+ * The in-place write FOLLOWED a symlinked config, and users keep these in
+ * dotfiles repositories. Renaming onto the link would replace it with a
+ * regular file and quietly detach the config from wherever it is tracked,
+ * so the link chain is resolved here — including a link whose target does
+ * not exist yet, which is how a dotfiles setup adds a config on first run.
+ *
+ * The walk stops at the first path with nothing at it, so the caller's own
+ * spelling is kept for a new config, and a cycle is reported rather than
+ * followed.
+ *
+ * A relative link is joined to its DIRECTORY, and that directory is
+ * canonicalized first. `path.resolve` only rewrites `..` lexically: if the
+ * config sits in a symlinked directory (`~/.cursor` → `/dotfiles/cursor`),
+ * a link of `../shared.json` then resolves to the wrong file, and the rename
+ * would replace content the config never read.
+ */
+function resolveWriteTarget(targetPath: string, depth = 0): string {
+  if (depth >= 40) {
+    throw new Error(`too many levels of symbolic links resolving ${targetPath}`);
+  }
+  let isLink: boolean;
+  try {
+    isLink = lstatSync(targetPath).isSymbolicLink();
+  } catch {
+    return targetPath;
+  }
+  if (!isLink) return targetPath;
+  const link = readlinkSync(targetPath);
+  const parent = canonicalDirectory(path.dirname(targetPath));
+  return resolveWriteTarget(path.resolve(parent, link), depth + 1);
+}
+
+/**
+ * The real path of `directory`, or of its longest existing ancestor with the
+ * remaining names kept, so a directory that does not exist yet still resolves
+ * everything above the missing part. `realpathSync` cannot be used alone: it
+ * throws on the whole path when the last component is missing.
+ */
+function canonicalDirectory(directory: string): string {
+  const missing: string[] = [];
+  let current = directory;
+  for (;;) {
+    try {
+      const real = realpathSync(current);
+      return missing.length === 0 ? real : path.join(real, ...missing.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return directory;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 /** Execute the `cfr-free mcp install` command. */

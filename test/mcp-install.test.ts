@@ -1,7 +1,20 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   clientConfigPath,
   formatMcpSnippet,
@@ -85,6 +98,192 @@ describe('mcp-install', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('leaves no temp file behind after a successful write', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-atomic-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      installClientConfig('cursor', target);
+      expect(readdirSync(tempDir)).toEqual(['mcp.json']);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  // The directory entry is what a rename publishes, so the rename itself is
+  // only durable once the directory has been synced. Both directory tests
+  // substitute `node:fs` because the ordering and the failure are not
+  // otherwise observable from a passing command.
+  it.skipIf(process.platform === 'win32')(
+    'flushes the destination directory after the rename',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dirsync-'));
+      try {
+        // The config is a link whose target sits in a sibling directory, so
+        // syncing the LINK's directory instead of the target's is visible in
+        // the recorded events.
+        const tracked = path.join(tempDir, 'tracked');
+        const clientDir = path.join(tempDir, 'client');
+        mkdirSync(tracked, { recursive: true });
+        mkdirSync(clientDir);
+        const realConfig = path.join(tracked, 'mcp.json');
+        writeFileSync(realConfig, '{"mcpServers":{}}\n', 'utf8');
+        const target = path.join(clientDir, 'mcp.json');
+        symlinkSync('../tracked/mcp.json', target);
+        // The code canonicalizes the link's directory, so compare the real
+        // path: on macOS `mkdtemp` hands out `/var/...`, whose real form is
+        // `/private/var/...`.
+        const trackedReal = realpathSync(tracked);
+        const events: string[] = [];
+
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          const opened = new Map<number, string>();
+          return {
+            ...actual,
+            openSync: (
+              file: Parameters<typeof actual.openSync>[0],
+              flags: Parameters<typeof actual.openSync>[1],
+              mode?: Parameters<typeof actual.openSync>[2],
+            ): number => {
+              const fd = actual.openSync(file, flags, mode);
+              const label =
+                flags === 'r' && file === trackedReal
+                  ? 'directory'
+                  : flags === 'r'
+                    ? 'wrong-directory'
+                    : 'temp';
+              opened.set(fd, label);
+              events.push(`open:${label}`);
+              return fd;
+            },
+            writeFileSync: (
+              file: Parameters<typeof actual.writeFileSync>[0],
+              data: Parameters<typeof actual.writeFileSync>[1],
+              options?: Parameters<typeof actual.writeFileSync>[2],
+            ): void => {
+              if (typeof file === 'number') events.push('write');
+              actual.writeFileSync(file, data, options);
+            },
+            fsyncSync: (fd: number): void => {
+              events.push(`fsync:${opened.get(fd) ?? 'unknown'}`);
+              actual.fsyncSync(fd);
+            },
+            renameSync: (
+              from: Parameters<typeof actual.renameSync>[0],
+              to: Parameters<typeof actual.renameSync>[1],
+            ): void => {
+              events.push('rename');
+              actual.renameSync(from, to);
+            },
+          };
+        });
+        const mocked = await import('../src/commands/mcp-install.js');
+
+        expect(mocked.installClientConfig('cursor', target).status).toBe('updated');
+
+        // Bytes before the name, name before its directory entry.
+        expect(events.indexOf('write')).toBeLessThan(events.indexOf('fsync:temp'));
+        expect(events[events.indexOf('rename') - 1]).toBe('fsync:temp');
+        expect(events.slice(events.indexOf('rename') + 1)).toContain('fsync:directory');
+        expect(events).not.toContain('open:wrong-directory');
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'still installs when the filesystem refuses a directory sync',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dirsync-fail-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        writeFileSync(target, '{"mcpServers":{}}\n', 'utf8');
+
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          return {
+            ...actual,
+            // A directory handler that cannot sync is a durability
+            // limitation, not a reason to fail a write that succeeded.
+            fsyncSync: (fd: number): void => {
+              const isDirectory = actual.fstatSync(fd).isDirectory();
+              if (isDirectory) {
+                const error = new Error('EINVAL: invalid argument, fsync') as NodeJS.ErrnoException;
+                error.code = 'EINVAL';
+                throw error;
+              }
+              actual.fsyncSync(fd);
+            },
+          };
+        });
+        const mocked = await import('../src/commands/mcp-install.js');
+
+        expect(mocked.installClientConfig('cursor', target).status).toBe('updated');
+        expect(readFileSync(target, 'utf8')).toContain('"mcpServers"');
+        expect(readdirSync(tempDir)).toEqual(['mcp.json']);
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'removes the temp file when the write fails part-way through',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-partial-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const original = '{"mcpServers":{}}\n';
+        writeFileSync(target, original, 'utf8');
+
+        // A disk that fills between the temp file's creation and its content
+        // is the case the cleanup exists for, and it cannot be reproduced
+        // portably (a real ENOSPC needs a disposable filesystem), so the one
+        // fs call that fails is substituted. Only `writeFileSync` is replaced
+        // and only for a file descriptor, which is the temp write.
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          return {
+            ...actual,
+            writeFileSync: (
+              file: Parameters<typeof actual.writeFileSync>[0],
+              data: Parameters<typeof actual.writeFileSync>[1],
+              options?: Parameters<typeof actual.writeFileSync>[2],
+            ): void => {
+              if (typeof file === 'number') {
+                const error = new Error(
+                  'ENOSPC: no space left on device, write',
+                ) as NodeJS.ErrnoException;
+                error.code = 'ENOSPC';
+                throw error;
+              }
+              actual.writeFileSync(file, data, options);
+            },
+          };
+        });
+        const partial = await import('../src/commands/mcp-install.js');
+
+        expect(() => partial.installClientConfig('cursor', target)).toThrow(/ENOSPC/);
+        // The config is untouched AND the half-made temp is gone: a leftover
+        // would make a later run with the same pid fail with EEXIST.
+        expect(readFileSync(target, 'utf8')).toBe(original);
+        expect(readdirSync(tempDir)).toEqual(['mcp.json']);
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('refuses to clobber a config it cannot parse', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-invalid-'));
@@ -174,6 +373,208 @@ describe('mcp-install', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === 'win32')('keeps the mode of a config it updates', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-mode-'));
+    // A umask of 002 would leave 0664 on a newly created file by itself, so
+    // the test would pass with the chmod removed. Pin the umask that makes
+    // the bits disappear, and restore whatever the runner had.
+    const previousUmask = process.umask(0o022);
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      writeFileSync(target, '{"mcpServers":{}}\n', 'utf8');
+      chmodSync(target, 0o664);
+      installClientConfig('cursor', target);
+      expect(statSync(target).mode & 0o777).toBe(0o664);
+    } finally {
+      process.umask(previousUmask);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'writes through a symlinked config instead of replacing the link',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-link-'));
+      try {
+        // Dotfile setups keep the real config in a tracked directory and
+        // symlink the client's path at it; a rename onto the LINK would leave
+        // the tracked file untouched and the user's setup broken.
+        const real = path.join(tempDir, 'real.json');
+        writeFileSync(real, '{"mcpServers":{"other":{"command":"x"}}}\n', 'utf8');
+        const link = path.join(tempDir, 'mcp.json');
+        symlinkSync(real, link);
+
+        installClientConfig('cursor', link);
+
+        expect(lstatSync(link).isSymbolicLink()).toBe(true);
+        const content = JSON.parse(readFileSync(real, 'utf8')) as Record<string, unknown>;
+        const servers = content['mcpServers'] as Record<string, unknown>;
+        expect(servers['other']).toEqual({ command: 'x' });
+        expect(servers['cfr-free']).toBeDefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'creates the target of a dangling symlink instead of replacing the link',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dangling-'));
+      try {
+        // A dotfiles setup links the client's path at a tracked file it has
+        // not created yet. Resolving the link must not fall back to the
+        // link's own path: a rename there would replace it with a regular
+        // file and detach the setup.
+        const real = path.join(tempDir, 'tracked.json');
+        const link = path.join(tempDir, 'mcp.json');
+        symlinkSync(real, link);
+
+        expect(installClientConfig('cursor', link).status).toBe('created');
+
+        expect(lstatSync(link).isSymbolicLink()).toBe(true);
+        const content = JSON.parse(readFileSync(real, 'utf8')) as Record<string, unknown>;
+        expect(content['mcpServers']).toBeDefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'resolves a relative link against the directory it really sits in',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dirlink-'));
+      try {
+        // The client's directory is a symlink two levels down (a dotfiles
+        // setup). The config inside it points one level up, so it names the
+        // file beside the TRACKED directory — not the file beside the link.
+        const deep = path.join(tempDir, 'deep');
+        const tracked = path.join(deep, 'tracked');
+        mkdirSync(tracked, { recursive: true });
+        const intended = path.join(deep, 'shared.json');
+        writeFileSync(intended, '{"mcpServers":{}}\n', 'utf8');
+        const clientDir = path.join(tempDir, 'client');
+        symlinkSync(tracked, clientDir);
+        const config = path.join(clientDir, 'mcp.json');
+        symlinkSync('../shared.json', config);
+
+        expect(installClientConfig('cursor', config).status).toBe('updated');
+
+        expect(lstatSync(config).isSymbolicLink()).toBe(true);
+        const content = JSON.parse(readFileSync(intended, 'utf8')) as Record<string, unknown>;
+        expect(content['mcpServers']).toBeDefined();
+        // A lexical `..` would have created this file instead, replacing
+        // content the config never read.
+        expect(existsSync(path.join(tempDir, 'shared.json'))).toBe(false);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // As root, `access(…, W_OK)` succeeds on a 0444 file, so there is nothing
+  // for this check to refuse.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'refuses a read-only config instead of replacing it through the rename',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-readonly-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const original = '{"mcpServers":{"other":{"command":"x"}}}\n';
+        writeFileSync(target, original, 'utf8');
+        // The rename needs write permission on the DIRECTORY only, so without
+        // an explicit check this read-only file would be replaced silently.
+        chmodSync(target, 0o444);
+
+        let caught: unknown;
+        try {
+          installClientConfig('cursor', target);
+        } catch (error) {
+          caught = error;
+        }
+        // The refusal is this module's, not the filesystem's: an OS error
+        // would carry an errno code. Asserting on that rather than on the
+        // message keeps a revert detectable without pinning the wording.
+        expect(caught).toBeInstanceOf(Error);
+        expect((caught as NodeJS.ErrnoException).code).toBeUndefined();
+        // A plain Error is exit 1; `CommandError` carries `exitCode` and would
+        // turn this into exit 5, which README reserves for an unparseable
+        // config. Neither the class nor the field may appear.
+        expect(caught).not.toBeInstanceOf(CommandError);
+        expect((caught as { exitCode?: number }).exitCode).toBeUndefined();
+        chmodSync(target, 0o644);
+        expect(readFileSync(target, 'utf8')).toBe(original);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps the original config when the rename fails',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-rename-fail-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const original = '{"mcpServers":{"existing":{"command":"x"}}}\n';
+        writeFileSync(target, original, 'utf8');
+
+        // The rename is the one step that publishes the new file, so a
+        // version that cleared the destination first would lose the config
+        // here — which is the data loss this function exists to prevent.
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          return {
+            ...actual,
+            renameSync: (): void => {
+              const error = new Error(
+                'ENOSPC: no space left on device, rename',
+              ) as NodeJS.ErrnoException;
+              error.code = 'ENOSPC';
+              throw error;
+            },
+          };
+        });
+        const mocked = await import('../src/commands/mcp-install.js');
+
+        expect(() => mocked.installClientConfig('cursor', target)).toThrow(/ENOSPC/);
+        expect(readFileSync(target, 'utf8')).toBe(original);
+        expect(readdirSync(tempDir)).toEqual(['mcp.json']);
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a pre-created temp path instead of writing through it',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-symlink-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const victim = path.join(tempDir, 'victim.txt');
+        writeFileSync(victim, 'untouched\n', 'utf8');
+        // The temp name is predictable; a hostile or accidental file sitting
+        // there must fail the install, not receive the config.
+        const squatter = `${target}.${process.pid}.cfr-free.tmp`;
+        symlinkSync(victim, squatter);
+        expect(() => installClientConfig('cursor', target)).toThrow();
+        expect(readFileSync(victim, 'utf8')).toBe('untouched\n');
+        expect(existsSync(target)).toBe(false);
+        // The cleanup removes only a temp this call CREATED. An occupant that
+        // was already there — this link — has to survive the refusal too, or
+        // the error path would delete a file it never made.
+        expect(lstatSync(squatter).isSymbolicLink()).toBe(true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('supports --print mode without writing files', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-print-'));
