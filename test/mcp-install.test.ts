@@ -122,10 +122,56 @@ describe('mcp-install', () => {
 
   it('rejects a client name it does not know', () => {
     expect(() => runMcpInstallCommand({ client: 'emacs' })).toThrow(CommandError);
+    let caught: unknown;
     try {
       runMcpInstallCommand({ client: 'cursor,emacs' });
     } catch (error) {
-      expect((error as CommandError).exitCode).toBe(EXIT.USAGE);
+      caught = error;
+    }
+    // Outside the `catch`: an assertion inside it silently passes when
+    // nothing is thrown at all, which is exactly the regression this covers.
+    expect(caught).toBeInstanceOf(CommandError);
+    expect((caught as CommandError).exitCode).toBe(EXIT.USAGE);
+  });
+
+  it('refuses a config that is not valid UTF-8 instead of rewriting its bytes', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-utf8-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      // Windows-1252 "café" in a JSON string: `e9` is not valid UTF-8, but a
+      // lenient decode turns it into U+FFFD and the file still parses.
+      const original = Buffer.concat([
+        Buffer.from('{"note":"caf'),
+        Buffer.from([0xe9]),
+        Buffer.from('","mcpServers":{}}'),
+      ]);
+      writeFileSync(target, original);
+
+      let caught: unknown;
+      try {
+        installClientConfig('cursor', target);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(CommandError);
+      expect((caught as CommandError).exitCode).toBe(EXIT.REFUSED);
+      expect(readFileSync(target).equals(original)).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a config whose mcpServers is not an object', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-servers-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      for (const original of ['{"mcpServers":[]}\n', '{"mcpServers":"cursor"}\n']) {
+        writeFileSync(target, original, 'utf8');
+        expect(() => installClientConfig('cursor', target)).toThrow(CommandError);
+        expect(readFileSync(target, 'utf8')).toBe(original);
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 

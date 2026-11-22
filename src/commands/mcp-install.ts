@@ -114,12 +114,12 @@ export function formatMcpSnippet(): string {
  * The installer only ever rewrites a config it can understand.
  *
  * @throws {CommandError} (exit 5) when a file exists but is unreadable,
- *   invalid JSON, or not a JSON object.
+ *   not valid UTF-8, invalid JSON, or not a JSON object.
  */
 function readExistingConfig(targetPath: string): Record<string, unknown> | null {
-  let raw: string;
+  let bytes: Buffer;
   try {
-    raw = readFileSync(targetPath, 'utf8');
+    bytes = readFileSync(targetPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw new CommandError(
@@ -128,12 +128,25 @@ function readExistingConfig(targetPath: string): Record<string, unknown> | null 
     );
   }
 
+  // Decode STRICTLY. A lenient `readFileSync(path, 'utf8')` replaces invalid
+  // bytes with U+FFFD, so a Windows-1252 config can still look like valid
+  // JSON, parse, and be rewritten with the original bytes destroyed — the
+  // exact loss this function exists to prevent. `fatal: true` refuses it.
+  // The default `ignoreBOM: false` also drops a leading UTF-8 BOM, which
+  // Windows editors write and which `JSON.parse` would reject.
+  let raw: string;
+  try {
+    raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new CommandError(
+      `${targetPath} is not valid UTF-8 — refusing to overwrite it; re-save it as UTF-8 or remove the file`,
+      EXIT.REFUSED,
+    );
+  }
+
   let parsed: unknown;
   try {
-    // A byte-order mark is not valid JSON, but Windows editors write one; it
-    // is dropped rather than made a reason to refuse a file that is otherwise
-    // fine.
-    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    parsed = JSON.parse(raw);
   } catch {
     throw new CommandError(
       `${targetPath} is not valid JSON — refusing to overwrite it; add the cfr-free entry by hand or remove the file`,
@@ -146,7 +159,22 @@ function readExistingConfig(targetPath: string): Record<string, unknown> | null 
       EXIT.REFUSED,
     );
   }
-  return parsed as Record<string, unknown>;
+  const config = parsed as Record<string, unknown>;
+  // The same rule one level down: entries live under `mcpServers`, so a
+  // non-object there means the entries cannot be merged — rewriting would
+  // delete them. Checking it here keeps every "cannot understand" reason in
+  // one place.
+  const servers = config['mcpServers'];
+  if (
+    servers !== undefined &&
+    (servers === null || typeof servers !== 'object' || Array.isArray(servers))
+  ) {
+    throw new CommandError(
+      `${targetPath} has a non-object "mcpServers" — refusing to overwrite it; remove the file and re-run`,
+      EXIT.REFUSED,
+    );
+  }
+  return config;
 }
 
 /** Install or update MCP server config for the given client. */
