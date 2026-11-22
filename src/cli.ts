@@ -80,7 +80,7 @@ Environment:
   CFR_LOG_LEVEL      debug|info|warn|error  (default info)
 
 Exit codes:
-  0 success   1 error   2 usage/config   3 index unavailable   4 port in use   5 export refused
+  0 success   1 error   2 usage/config   3 index unavailable   4 port in use   5 refused to overwrite
 `;
 
 /**
