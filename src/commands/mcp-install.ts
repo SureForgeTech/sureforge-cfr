@@ -9,6 +9,7 @@ import {
   openSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -339,6 +340,12 @@ function writeConfigAtomically(
  * The walk stops at the first path with nothing at it, so the caller's own
  * spelling is kept for a new config, and a cycle is reported rather than
  * followed.
+ *
+ * A relative link is joined to its DIRECTORY, and that directory is
+ * canonicalized first. `path.resolve` only rewrites `..` lexically: if the
+ * config sits in a symlinked directory (`~/.cursor` → `/dotfiles/cursor`),
+ * a link of `../shared.json` then resolves to the wrong file, and the rename
+ * would replace content the config never read.
  */
 function resolveWriteTarget(targetPath: string, depth = 0): string {
   if (depth >= 40) {
@@ -352,7 +359,30 @@ function resolveWriteTarget(targetPath: string, depth = 0): string {
   }
   if (!isLink) return targetPath;
   const link = readlinkSync(targetPath);
-  return resolveWriteTarget(path.resolve(path.dirname(targetPath), link), depth + 1);
+  const parent = canonicalDirectory(path.dirname(targetPath));
+  return resolveWriteTarget(path.resolve(parent, link), depth + 1);
+}
+
+/**
+ * The real path of `directory`, or of its longest existing ancestor with the
+ * remaining names kept, so a directory that does not exist yet still resolves
+ * everything above the missing part. `realpathSync` cannot be used alone: it
+ * throws on the whole path when the last component is missing.
+ */
+function canonicalDirectory(directory: string): string {
+  const missing: string[] = [];
+  let current = directory;
+  for (;;) {
+    try {
+      const real = realpathSync(current);
+      return missing.length === 0 ? real : path.join(real, ...missing.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return directory;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 /** Execute the `cfr-free mcp install` command. */

@@ -2,6 +2,7 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -309,6 +310,38 @@ describe('mcp-install', () => {
         expect(lstatSync(link).isSymbolicLink()).toBe(true);
         const content = JSON.parse(readFileSync(real, 'utf8')) as Record<string, unknown>;
         expect(content['mcpServers']).toBeDefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'resolves a relative link against the directory it really sits in',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dirlink-'));
+      try {
+        // The client's directory is a symlink two levels down (a dotfiles
+        // setup). The config inside it points one level up, so it names the
+        // file beside the TRACKED directory — not the file beside the link.
+        const deep = path.join(tempDir, 'deep');
+        const tracked = path.join(deep, 'tracked');
+        mkdirSync(tracked, { recursive: true });
+        const intended = path.join(deep, 'shared.json');
+        writeFileSync(intended, '{"mcpServers":{}}\n', 'utf8');
+        const clientDir = path.join(tempDir, 'client');
+        symlinkSync(tracked, clientDir);
+        const config = path.join(clientDir, 'mcp.json');
+        symlinkSync('../shared.json', config);
+
+        expect(installClientConfig('cursor', config).status).toBe('updated');
+
+        expect(lstatSync(config).isSymbolicLink()).toBe(true);
+        const content = JSON.parse(readFileSync(intended, 'utf8')) as Record<string, unknown>;
+        expect(content['mcpServers']).toBeDefined();
+        // A lexical `..` would have created this file instead, replacing
+        // content the config never read.
+        expect(existsSync(path.join(tempDir, 'shared.json'))).toBe(false);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
