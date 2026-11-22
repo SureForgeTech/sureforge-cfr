@@ -1,8 +1,41 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { CommandError, EXIT } from '../exit-codes.js';
 
 export type SupportedClient = 'cursor' | 'claude' | 'windsurf' | 'vscode';
+
+/** Every client the installer knows, in the order `--client all` uses. */
+const SUPPORTED_CLIENTS: readonly SupportedClient[] = ['cursor', 'claude', 'windsurf', 'vscode'];
+
+/** True for a name the installer knows. */
+function isSupportedClient(value: string): value is SupportedClient {
+  return (SUPPORTED_CLIENTS as readonly string[]).includes(value);
+}
+
+/**
+ * The clients one `--client` value names, deduplicated and validated.
+ *
+ * The CLI parser checks the flag itself, but `runMcpInstallCommand` is also a
+ * library surface, and there the value was CAST to the union: an unknown name
+ * reached `clientConfigPath`, whose switch has no case for it and returns
+ * `undefined`, so the installer tried to write a file at "undefined".
+ *
+ * @throws {CommandError} (exit 2) for a name the installer does not know.
+ */
+function resolveClients(rawClient: string): readonly SupportedClient[] {
+  if (rawClient === 'all') return SUPPORTED_CLIENTS;
+  const names = [...new Set(rawClient.split(',').map((name) => name.trim()))].filter(
+    (name) => name !== '',
+  );
+  if (names.length === 0 || !names.every(isSupportedClient)) {
+    throw new CommandError(
+      `client must be one of: ${SUPPORTED_CLIENTS.join(', ')}, all`,
+      EXIT.USAGE,
+    );
+  }
+  return names as SupportedClient[];
+}
 
 export interface McpInstallOptions {
   readonly client?: string | undefined;
@@ -71,38 +104,73 @@ export function formatMcpSnippet(): string {
   return JSON.stringify({ mcpServers: { 'cfr-free': MCP_ENTRY } }, null, 2);
 }
 
+/**
+ * The parsed config already at `targetPath`, or null when there is none.
+ *
+ * A file that exists but cannot be read or parsed is REFUSED, not replaced.
+ * Client config files are the user's: a VS Code or Cursor file may contain
+ * comments or trailing commas that `JSON.parse` rejects, and the previous
+ * "start fresh" fallback silently destroyed every other server entry in it.
+ * The installer only ever rewrites a config it can understand.
+ *
+ * @throws {CommandError} (exit 5) when a file exists but is unreadable,
+ *   invalid JSON, or not a JSON object.
+ */
+function readExistingConfig(targetPath: string): Record<string, unknown> | null {
+  let raw: string;
+  try {
+    raw = readFileSync(targetPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new CommandError(
+      `cannot read ${targetPath} — refusing to overwrite it; fix its permissions or remove it first`,
+      EXIT.REFUSED,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    // A byte-order mark is not valid JSON, but Windows editors write one; it
+    // is dropped rather than made a reason to refuse a file that is otherwise
+    // fine.
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+  } catch {
+    throw new CommandError(
+      `${targetPath} is not valid JSON — refusing to overwrite it; add the cfr-free entry by hand or remove the file`,
+      EXIT.REFUSED,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new CommandError(
+      `${targetPath} does not contain a JSON object — refusing to overwrite it; remove the file and re-run`,
+      EXIT.REFUSED,
+    );
+  }
+  return parsed as Record<string, unknown>;
+}
+
 /** Install or update MCP server config for the given client. */
 export function installClientConfig(
   _client: SupportedClient,
   targetPath: string,
 ): { updated: boolean; status: 'updated' | 'created' } {
-  let existing: Record<string, unknown> = {};
-  let isCreated = true;
-  try {
-    const raw = readFileSync(targetPath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      existing = parsed as Record<string, unknown>;
-      isCreated = false;
-    }
-  } catch {
-    // File does not exist or invalid JSON; start fresh
-    isCreated = true;
-  }
+  const existing = readExistingConfig(targetPath);
+  const isCreated = existing === null;
+  const config: Record<string, unknown> = existing ?? {};
 
   const mcpServers =
-    existing['mcpServers'] &&
-    typeof existing['mcpServers'] === 'object' &&
-    !Array.isArray(existing['mcpServers'])
-      ? (existing['mcpServers'] as Record<string, unknown>)
+    config['mcpServers'] &&
+    typeof config['mcpServers'] === 'object' &&
+    !Array.isArray(config['mcpServers'])
+      ? (config['mcpServers'] as Record<string, unknown>)
       : {};
 
   mcpServers['cfr-free'] = MCP_ENTRY;
-  existing['mcpServers'] = mcpServers;
+  config['mcpServers'] = mcpServers;
 
   const parentDir = path.dirname(targetPath);
   mkdirSync(parentDir, { recursive: true });
-  writeFileSync(targetPath, JSON.stringify(existing, null, 2) + '\n', 'utf8');
+  writeFileSync(targetPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
 
   return {
     updated: true,
@@ -117,12 +185,7 @@ export function runMcpInstallCommand(options: McpInstallOptions = {}): {
 } {
   const cwd = options.cwd ?? process.cwd();
   const homedir = options.homedir ?? os.homedir();
-  const rawClient = (options.client ?? 'all').toLowerCase();
-
-  const validClients: SupportedClient[] =
-    rawClient === 'all'
-      ? ['cursor', 'claude', 'windsurf', 'vscode']
-      : (rawClient.split(',').map((c) => c.trim()) as SupportedClient[]);
+  const clients = resolveClients((options.client ?? 'all').toLowerCase());
 
   if (options.print === true) {
     const lines = [
@@ -133,7 +196,7 @@ export function runMcpInstallCommand(options: McpInstallOptions = {}): {
       '```',
     ];
     return {
-      results: validClients.map((client) => ({
+      results: clients.map((client) => ({
         client,
         path: clientConfigPath(client, { cwd, homedir, workspace: options.workspace }),
         updated: false,
@@ -146,7 +209,7 @@ export function runMcpInstallCommand(options: McpInstallOptions = {}): {
   const results: McpInstallResult[] = [];
   const lines: string[] = [];
 
-  for (const client of validClients) {
+  for (const client of clients) {
     const targetPath = clientConfigPath(client, { cwd, homedir, workspace: options.workspace });
     const { updated, status } = installClientConfig(client, targetPath);
     results.push({ client, path: targetPath, updated, status });

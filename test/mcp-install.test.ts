@@ -8,6 +8,7 @@ import {
   installClientConfig,
   runMcpInstallCommand,
 } from '../src/commands/mcp-install.js';
+import { CommandError, EXIT } from '../src/exit-codes.js';
 
 describe('mcp-install', () => {
   it('formats snippet with npx command and mcp args', () => {
@@ -67,6 +68,64 @@ describe('mcp-install', () => {
       expect(servers['cfr-free']).toBeDefined();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a config whose first byte is a byte-order mark', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-bom-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      writeFileSync(target, '\uFEFF{"mcpServers":{"other":{"command":"other-cmd"}}}', 'utf8');
+      expect(installClientConfig('cursor', target).status).toBe('updated');
+      const content = JSON.parse(readFileSync(target, 'utf8')) as Record<string, unknown>;
+      const servers = content['mcpServers'] as Record<string, unknown>;
+      expect(servers['other']).toEqual({ command: 'other-cmd' });
+      expect(servers['cfr-free']).toBeDefined();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to clobber a config it cannot parse', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-invalid-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      // JSONC: VS Code and Cursor both accept comments and trailing commas in
+      // their config files, and `JSON.parse` rejects them. The previous
+      // behaviour replaced the whole file with `{"mcpServers": …}`.
+      const original = '{\n  // my servers\n  "mcpServers": { "other": { "command": "x" } },\n}\n';
+      writeFileSync(target, original, 'utf8');
+
+      expect(() => installClientConfig('cursor', target)).toThrow(CommandError);
+      try {
+        installClientConfig('cursor', target);
+      } catch (error) {
+        expect((error as CommandError).exitCode).toBe(EXIT.REFUSED);
+      }
+      expect(readFileSync(target, 'utf8')).toBe(original);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to clobber a config whose root is not a JSON object', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-array-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      writeFileSync(target, '[]\n', 'utf8');
+      expect(() => installClientConfig('cursor', target)).toThrow(CommandError);
+      expect(readFileSync(target, 'utf8')).toBe('[]\n');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a client name it does not know', () => {
+    expect(() => runMcpInstallCommand({ client: 'emacs' })).toThrow(CommandError);
+    try {
+      runMcpInstallCommand({ client: 'cursor,emacs' });
+    } catch (error) {
+      expect((error as CommandError).exitCode).toBe(EXIT.USAGE);
     }
   });
 

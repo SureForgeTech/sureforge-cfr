@@ -23,7 +23,11 @@ Signatures and one-line purposes live in `USAGE` (`src/cli.ts`); `help`
 and `version` dispatch there, the other entrypoints in `src/commands/`.
 The CLI additionally supports agent and developer automation: `cfr-free mcp install`
 for zero-config editor MCP client setup (Cursor, Claude Desktop,
-Windsurf, VS Code), `cfr-free vibe rules` and `cfr-free vibe prompt` for
+Windsurf, VS Code) — the installer merges its entry into an existing client
+config and never rewrites one it cannot parse, because those files are the
+user's and may hold comments or another server's settings (an unparseable or
+non-object file is refused with exit 5, the same code `export` uses for a
+destructive write it declines) — `cfr-free vibe rules` and `cfr-free vibe prompt` for
 pre-packaged agent system rules and claim evaluation workflows,
 `cfr-free vibe ui` for copy-paste Tailwind and React components (v0, Lovable, Cursor),
 `cfr-free vibe combine` and `/api/v1/vibe/combine` for 38 C.F.R. § 4.25 VA Math
