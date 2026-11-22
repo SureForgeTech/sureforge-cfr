@@ -1,10 +1,13 @@
 import {
   accessSync,
   chmodSync,
+  closeSync,
   constants,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
-  realpathSync,
+  readlinkSync,
   renameSync,
   rmSync,
   statSync,
@@ -280,34 +283,65 @@ function writeConfigAtomically(
 ): void {
   const destination = resolveWriteTarget(targetPath);
   const tempPath = `${destination}.${process.pid}.cfr-free.tmp`;
+  // `openSync` with 'wx' is what makes the temp file OURS: it either creates
+  // a brand-new entry or throws. Only a file this call created is removed
+  // on the way out, so an existing temp (or a symlink squatting on the
+  // name) is never deleted or written through.
+  let fd: number | undefined;
   let created = false;
   try {
-    writeFileSync(tempPath, contents, { encoding: 'utf8', flag: 'wx', mode: mode ?? 0o666 });
+    fd = openSync(tempPath, 'wx', mode ?? 0o666);
     created = true;
+    writeFileSync(fd, contents, 'utf8');
+    closeSync(fd);
+    fd = undefined;
     // `mode` at creation is masked by the process umask, so an existing
     // 0664 config would come back 0644. Set the bits explicitly instead.
     if (mode !== undefined) chmodSync(tempPath, mode);
     renameSync(tempPath, destination);
   } catch (error) {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // The original error is the one worth reporting.
+      }
+    }
+    // `created` is set as soon as `openSync` returns, so a write that fails
+    // part-way (ENOSPC, EIO, EDQUOT) still leaves nothing behind — and a
+    // temp path this call did not create (EEXIST) is never removed.
     if (created) rmSync(tempPath, { force: true });
     throw error;
   }
 }
 
 /**
- * The path a rename should target: the real file when `targetPath` is an
- * existing symlink, and `targetPath` itself otherwise.
+ * The path a rename should target: the file at the end of a chain of
+ * symlinks, whether or not that file exists yet.
  *
- * `realpathSync` also collapses `.`/`..` and any other link in the path, so
- * it is only consulted for a target that already exists; a new config keeps
- * the path the caller named (its parent may not exist yet).
+ * The in-place write FOLLOWED a symlinked config, and users keep these in
+ * dotfiles repositories. Renaming onto the link would replace it with a
+ * regular file and quietly detach the config from wherever it is tracked,
+ * so the link chain is resolved here — including a link whose target does
+ * not exist yet, which is how a dotfiles setup adds a config on first run.
+ *
+ * The walk stops at the first path with nothing at it, so the caller's own
+ * spelling is kept for a new config, and a cycle is reported rather than
+ * followed.
  */
-function resolveWriteTarget(targetPath: string): string {
+function resolveWriteTarget(targetPath: string, depth = 0): string {
+  if (depth >= 40) {
+    throw new Error(`too many levels of symbolic links resolving ${targetPath}`);
+  }
+  let isLink: boolean;
   try {
-    return realpathSync(targetPath);
+    isLink = lstatSync(targetPath).isSymbolicLink();
   } catch {
     return targetPath;
   }
+  if (!isLink) return targetPath;
+  const link = readlinkSync(targetPath);
+  return resolveWriteTarget(path.resolve(path.dirname(targetPath), link), depth + 1);
 }
 
 /** Execute the `cfr-free mcp install` command. */

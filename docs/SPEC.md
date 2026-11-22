@@ -27,10 +27,13 @@ Windsurf, VS Code) — the installer merges its entry into an existing client
 config and never rewrites one it cannot parse, because those files are the
 user's and may hold comments or another server's settings (an unparseable or
 non-object file is refused with exit 5, the same code `export` uses for a
-destructive write it declines), and it replaces the file in one step — a
+destructive write it declines). It replaces the file in one step — a
 sibling temporary file renamed into place — so an interrupted or failed write
-leaves the user's config as it was instead of half-written. A config that is
-read-only is left alone and the write fails, as it did before — `cfr-free vibe rules` and `cfr-free vibe prompt` for
+leaves the user's config as it was instead of half-written, and it writes
+through a symlinked config (including one whose target does not exist yet)
+rather than replacing the link, so a dotfiles setup keeps it. A config that
+is read-only is left alone and the write fails, as it did before —
+`cfr-free vibe rules` and `cfr-free vibe prompt` for
 pre-packaged agent system rules and claim evaluation workflows,
 `cfr-free vibe ui` for copy-paste Tailwind and React components (v0, Lovable, Cursor),
 `cfr-free vibe combine` and `/api/v1/vibe/combine` for 38 C.F.R. § 4.25 VA Math

@@ -199,15 +199,18 @@ describe('mcp-install', () => {
 
   it.skipIf(process.platform === 'win32')('keeps the mode of a config it updates', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-mode-'));
+    // A umask of 002 would leave 0664 on a newly created file by itself, so
+    // the test would pass with the chmod removed. Pin the umask that makes
+    // the bits disappear, and restore whatever the runner had.
+    const previousUmask = process.umask(0o022);
     try {
       const target = path.join(tempDir, 'mcp.json');
       writeFileSync(target, '{"mcpServers":{}}\n', 'utf8');
-      // 0664 is not what the umask leaves behind, so a temp file that only
-      // carried the bits through `writeFileSync`'s `mode` would not match.
       chmodSync(target, 0o664);
       installClientConfig('cursor', target);
       expect(statSync(target).mode & 0o777).toBe(0o664);
     } finally {
+      process.umask(previousUmask);
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
@@ -239,6 +242,32 @@ describe('mcp-install', () => {
   );
 
   it.skipIf(process.platform === 'win32')(
+    'creates the target of a dangling symlink instead of replacing the link',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dangling-'));
+      try {
+        // A dotfiles setup links the client's path at a tracked file it has
+        // not created yet. Resolving the link must not fall back to the
+        // link's own path: a rename there would replace it with a regular
+        // file and detach the setup.
+        const real = path.join(tempDir, 'tracked.json');
+        const link = path.join(tempDir, 'mcp.json');
+        symlinkSync(real, link);
+
+        expect(installClientConfig('cursor', link).status).toBe('created');
+
+        expect(lstatSync(link).isSymbolicLink()).toBe(true);
+        const content = JSON.parse(readFileSync(real, 'utf8')) as Record<string, unknown>;
+        expect(content['mcpServers']).toBeDefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // As root, `access(…, W_OK)` succeeds on a 0444 file, so there is nothing
+  // for this check to refuse.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'refuses a read-only config instead of replacing it through the rename',
     () => {
       const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-readonly-'));
@@ -256,8 +285,11 @@ describe('mcp-install', () => {
         } catch (error) {
           caught = error;
         }
+        // The refusal is this module's, not the filesystem's: an OS error
+        // would carry an errno code. Asserting on that rather than on the
+        // message keeps a revert detectable without pinning the wording.
         expect(caught).toBeInstanceOf(Error);
-        expect((caught as Error).message).toContain('read-only');
+        expect((caught as NodeJS.ErrnoException).code).toBeUndefined();
         chmodSync(target, 0o644);
         expect(readFileSync(target, 'utf8')).toBe(original);
       } finally {
