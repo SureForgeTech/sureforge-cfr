@@ -6,7 +6,7 @@ import { runMcpCommand } from './commands/mcp.js';
 import { runMcpInstallCommand } from './commands/mcp-install.js';
 import { runServeCommand } from './commands/serve.js';
 import { runSyncCommand } from './commands/sync.js';
-import { PART_NUMBER_PATTERN } from './core/part-number.js';
+import { normalizePartNumber, PART_NUMBER_PATTERN } from './core/part-number.js';
 import { runExportCommand } from './commands/export.js';
 import { formatSnapshotComparison, runCompareCommand } from './commands/compare.js';
 import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
@@ -349,7 +349,8 @@ function parseComparePart(raw: string): string {
   if (!PART_NUMBER_PATTERN.test(raw)) {
     throw new CliError(`compare --part must be a CFR part number such as 4, got: ${raw}`);
   }
-  return raw;
+  // The canonical spelling, like the search's: "04" names part 4.
+  return normalizePartNumber(raw);
 }
 
 /** Parse `compare <from_snapshot> <to_snapshot> [--part P]`. */

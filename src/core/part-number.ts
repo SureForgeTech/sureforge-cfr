@@ -2,10 +2,10 @@
  * The shape of a CFR part filter, and its canonical spelling.
  *
  * A part identifier is a plain number ("4"), and a caller may write it with
- * leading zeros ("04"). The index holds the canonical form — the eCFR XML
- * writes part identifiers as plain integers — so an unnormalized filter
- * matches NO row: a search answers "no hits" and a comparison answers
- * "nothing changed" for a part that did change.
+ * leading zeros ("04"). The index holds the canonical form — today the
+ * eCFR XML writes part identifiers as plain integers — so an unnormalized
+ * filter matches NO row: a search answers "no hits" and a comparison
+ * answers "nothing changed" for a part that did change.
  *
  * One account of the spelling, used wherever a caller's part becomes a
  * filter.
