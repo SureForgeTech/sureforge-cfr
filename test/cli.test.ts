@@ -408,6 +408,56 @@ describe('main', () => {
     }
   });
 
+  it('names the titles an export covered when it covered more than one', async () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.1', text: 'Title 38 body.' }),
+        makeSection({ title: 12, citation: '1026.1', text: 'Title 12 body.' }),
+      ],
+      issueDate: '2026-01-01',
+    });
+    try {
+      for (const format of ['md', 'jsonl', undefined] as const) {
+        const target = path.join(temp.dir, `dump-${format ?? 'sqlite'}`);
+        const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
+        const code = await main(
+          format === undefined ? ['export', target] : ['export', target, format],
+          io,
+        );
+        expect(code, format).toBe(EXIT.OK);
+        const printed = out.join('');
+        // The export writes EVERY stored title's rows, so the line says which
+        // titles it covered — in every format.
+        expect(printed, format).toContain(
+          `exported 2 provisions from Titles 12 and 38 as ${format ?? 'sqlite'}`,
+        );
+      }
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps a single-title export line exactly as it was', async () => {
+    const temp = openTempStore({ issueDate: '2026-01-01' });
+    try {
+      for (const format of ['md', 'jsonl', undefined] as const) {
+        const target = path.join(temp.dir, `single-${format ?? 'sqlite'}`);
+        const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
+        const code = await main(
+          format === undefined ? ['export', target] : ['export', target, format],
+          io,
+        );
+        expect(code, format).toBe(EXIT.OK);
+        // A pipeline may parse this line: a single-title export keeps it.
+        expect(out.join(''), format).toMatch(
+          new RegExp(`^exported \\d+ provisions as ${format ?? 'sqlite'} \\(\\d+ bytes\\) to `),
+        );
+      }
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('applies the CLI compare --part filter', async () => {
     const fromTemp = openTempStore({
       sections: [

@@ -23,7 +23,11 @@ Signatures and one-line purposes live in `USAGE` (`src/cli.ts`); `help`
 and `version` dispatch there, the other entrypoints in `src/commands/`.
 The CLI additionally supports agent and developer automation: `cfr-free mcp install`
 for zero-config editor MCP client setup (Cursor, Claude Desktop,
-Windsurf, VS Code), `cfr-free vibe rules` and `cfr-free vibe prompt` for
+Windsurf, VS Code) — the installer merges its entry into an existing client
+config and never rewrites one it cannot parse, because those files are the
+user's and may hold comments or another server's settings (an unparseable or
+non-object file is refused with exit 5, the same code `export` uses for a
+destructive write it declines) — `cfr-free vibe rules` and `cfr-free vibe prompt` for
 pre-packaged agent system rules and claim evaluation workflows,
 `cfr-free vibe ui` for copy-paste Tailwind and React components (v0, Lovable, Cursor),
 `cfr-free vibe combine` and `/api/v1/vibe/combine` for 38 C.F.R. § 4.25 VA Math
@@ -454,7 +458,10 @@ every read names the authority it answers with:
   the per-title key `title.<N>.issue_date`; the legacy `issue_date` key is
   Title 38's fallback, and only Title 38's. A document holding only Title 38
   therefore keeps the header it has always had, byte for byte, whenever the
-  two keys agree — which is what every sync records.) Making the surfaces above
+  two keys agree — which is what every sync records. The export's own line
+  names the titles it covered when it covered more than one, so a multi-title
+  export never reads as an export of one title; a single-title export keeps
+  the line it has always had.) Making the surfaces above
   title-scoped is a separate change.
 - `indexIssueDate` and `indexStale` describe Title 38's freshness; the
   stale-index warning's point-in-time URL names the title the answer is

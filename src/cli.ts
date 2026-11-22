@@ -7,7 +7,7 @@ import { runMcpInstallCommand } from './commands/mcp-install.js';
 import { runServeCommand } from './commands/serve.js';
 import { runSyncCommand } from './commands/sync.js';
 import { normalizePartNumber, PART_NUMBER_PATTERN } from './core/part-number.js';
-import { runExportCommand } from './commands/export.js';
+import { formatExportReport, runExportCommand } from './commands/export.js';
 import { formatSnapshotComparison, runCompareCommand } from './commands/compare.js';
 import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
@@ -80,7 +80,7 @@ Environment:
   CFR_LOG_LEVEL      debug|info|warn|error  (default info)
 
 Exit codes:
-  0 success   1 error   2 usage/config   3 index unavailable   4 port in use   5 export refused
+  0 success   1 error   2 usage/config   3 index unavailable   4 port in use   5 refused to overwrite
 `;
 
 /**
@@ -1051,10 +1051,7 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
     }
     if (command === 'export') {
       const report = runExportCommand(config, parsed.exportPath, logger, parsed.exportFormat);
-      io.out(
-        `exported ${report.provisions} provisions as ${report.format} ` +
-          `(${report.bytes} bytes) to ${report.path}\n`,
-      );
+      io.out(formatExportReport(report));
       return 0;
     }
     if (command === 'verify') {
