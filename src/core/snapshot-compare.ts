@@ -1,9 +1,9 @@
-import { statSync } from 'node:fs';
 import path from 'node:path';
 import type { Logger } from '../logger.js';
 import { CHANGE_LIST_CAP, diffHashes } from './changes.js';
 import { assertIssueDate } from './diff.js';
 import { ServiceError } from './errors.js';
+import { inspectPathShape } from './path-shape.js';
 import { lcsHunks, presenceHunks, splitRedlineLines, type Hunk } from './redline.js';
 import { DEFAULT_TITLE, Store, type SectionRow } from './store.js';
 import { datedSourceUrlFor } from './urls.js';
@@ -349,28 +349,26 @@ function changedChange(citation: string, from: SideContext, to: SideContext): Sn
  * goes to the server log.
  */
 function openSnapshot(resolved: string, label: string, logger: Logger): Store {
-  let isFile: boolean;
-  try {
-    isFile = statSync(resolved).isFile();
-  } catch (error) {
-    if (isMissingFile(error)) {
-      throw new ServiceError(
-        `the ${label} snapshot does not exist — store one first with \`cfr-free export <path>\``,
-        'invalid_input',
-      );
-    }
+  const shape = inspectPathShape(resolved);
+  if (shape.kind === 'missing') {
+    throw new ServiceError(
+      `the ${label} snapshot does not exist — store one first with \`cfr-free export <path>\``,
+      'invalid_input',
+    );
+  }
+  if (shape.kind === 'unreadable') {
     // The file cannot be inspected at all (its directory cannot be read, it
     // vanished): the detail is for the log, the client gets guidance.
     logger.error('snapshot could not be inspected', {
       side: label,
-      message: error instanceof Error ? error.message : String(error),
+      message: shape.detail,
     });
     throw new ServiceError(
       `the ${label} snapshot could not be read — it must be a readable cfr-free index file`,
       'invalid_input',
     );
   }
-  if (!isFile) {
+  if (shape.kind === 'not-a-regular-file') {
     throw new ServiceError(
       `the ${label} snapshot is not a regular file — a snapshot must be a cfr-free index file`,
       'invalid_input',
@@ -394,21 +392,6 @@ function openSnapshot(resolved: string, label: string, logger: Logger): Store {
       'invalid_input',
     );
   }
-}
-
-/**
- * Whether a stat failure means the path is not there (as opposed to
- * unreadable).
- *
- * ENOENT is "not there"; ENOTDIR is "not there either" — a path whose parent
- * component is a regular file cannot name a snapshot. Every other errno
- * (EACCES, ELOOP, ENAMETOOLONG, …) means the path might be there and could
- * not be inspected.
- */
-function isMissingFile(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
-  const code = (error as { code?: unknown }).code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 /** The recorded issue date of a snapshot, rejecting files that record none. */

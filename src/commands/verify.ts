@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { AppConfig } from '../config.js';
 import { CORPUS_RECEIPT_LIMIT, corpusHash } from '../core/changes.js';
 import { ServiceError } from '../core/errors.js';
+import { inspectPathShape } from '../core/path-shape.js';
 import { DEFAULT_TITLE, Store } from '../core/store.js';
 import type { Logger } from '../logger.js';
 
@@ -26,6 +26,10 @@ import type { Logger } from '../logger.js';
  * the copy the receipt describes?" with "no": that is the command's finding,
  * so the report is still printed and the exit code is 1 (`EXIT.ERROR` — no
  * new exit code).
+ *
+ * The file is checked BEFORE it is opened: SQLite's open is synchronous and
+ * blocks on a FIFO, so a directory, a device or a FIFO is refused as a usage
+ * mistake instead of hanging the command.
  */
 
 /** The receipt verdict: the recorded hash is gone, agrees, or disagrees. */
@@ -67,8 +71,9 @@ function refuse(detail: string): ServiceError {
  * Verify the index at `config.indexPath`, or the stored snapshot at
  * `snapshot`. Never creates or repairs the file; see the module doc comment.
  *
- * @throws {ServiceError} (`invalid_input`) when the path is missing or the
- *   file cannot be opened as a current-schema cfr-free index.
+ * @throws {ServiceError} (`invalid_input`) when the path is missing, cannot
+ *   be read, is not a regular file, or cannot be opened as a current-schema
+ *   cfr-free index.
  */
 export function runVerifyCommand(
   config: AppConfig,
@@ -76,11 +81,27 @@ export function runVerifyCommand(
   snapshot?: string,
 ): VerifyReport {
   const resolved = snapshot === undefined ? config.indexPath : path.resolve(snapshot);
-  if (!existsSync(resolved)) {
+  // The file is handed to SQLite, whose SYNCHRONOUS open BLOCKS on a FIFO:
+  // the reader would wait forever for a writer that never comes. The shape
+  // of the path is therefore decided BEFORE the open, and it tells "not
+  // there" from "cannot be read" — `existsSync` answers false for both.
+  const shape = inspectPathShape(resolved);
+  if (shape.kind === 'missing') {
     logger.warn('verification found no file', { path: resolved });
     throw refuse(
       'no index or snapshot here — run `cfr-free sync` first, or store a snapshot with `cfr-free export <path>`',
     );
+  }
+  if (shape.kind === 'unreadable') {
+    logger.warn('verification could not inspect the file', {
+      path: resolved,
+      detail: shape.detail,
+    });
+    throw refuse('cannot be read — it must be a readable cfr-free index file');
+  }
+  if (shape.kind === 'not-a-regular-file') {
+    logger.warn('verification refused a file that is not a regular file', { path: resolved });
+    throw refuse('not a regular file — it must be a cfr-free index file');
   }
   let store: Store;
   try {
@@ -88,9 +109,7 @@ export function runVerifyCommand(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     logger.warn('verification refused the file', { path: resolved, detail });
-    throw refuse(
-      'cannot open as a cfr-free index — the file is missing, unreadable, or not a cfr-free index',
-    );
+    throw refuse('cannot open as a cfr-free index — the file is not a cfr-free index');
   }
   try {
     // ONE read snapshot for the whole verification: the counts, the
