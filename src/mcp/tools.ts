@@ -322,7 +322,7 @@ const snapshotChangeSchema = z.object({
     .string()
     .describe(
       'the provision’s heading, bounded at 1,000 characters; a heading of that length or more ' +
-        'is cut and ends with "…". When a retitle’s difference lies beyond the bound, the two ' +
+        'is marked with an ellipsis. When a retitle’s difference lies beyond the bound, the two ' +
         'clipped headings are identical on the wire and `headingChanged` is the only signal',
     ),
   headingChanged: z
