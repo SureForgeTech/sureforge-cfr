@@ -4,12 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,7 +30,9 @@ jobs:
         # `if` cannot see the `matrix` context — attempting it invalidates
         # the whole workflow, which GitHub reports as a failed run with
         # zero jobs rather than as a filter that did not match.
-        node: ${{ github.event_name == 'pull_request' && fromJSON('[22, 24]') || fromJSON('[22]') }}
+        # A manual run validates both supported Node versions on the exact
+        # main commit when a downstream operation needs the complete matrix.
+        node: ${{ github.event_name == 'push' && fromJSON('[22]') || fromJSON('[22, 24]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

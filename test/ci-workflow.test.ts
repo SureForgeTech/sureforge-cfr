@@ -44,6 +44,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 import {
   ci,
@@ -452,8 +453,8 @@ function matrixExpression(matrix: Record<string, unknown> | undefined): string {
 
 /**
  * The version lists a `node:` matrix expression expands to, in source order:
- * the first entry is what a `pull_request` run gets, the second what the
- * other events get.
+ * the first entry is the push matrix, the second is the pull request and
+ * manual dispatch matrix.
  */
 function matrixArms(matrix: Record<string, unknown> | undefined): string[][] {
   return [...matrixExpression(matrix).matchAll(/fromJSON\('(\[[^']*\])'\)/g)].map((match) => {
@@ -475,7 +476,7 @@ function matrixArms(matrix: Record<string, unknown> | undefined): string[][] {
 function pullRequestNodes(matrix: Record<string, unknown> | undefined): string[] {
   const literal = matrix?.['node'];
   if (Array.isArray(literal)) return literal.map(String);
-  return matrixArms(matrix)[0] ?? [];
+  return matrixArms(matrix)[1] ?? [];
 }
 
 /** The steps of a job that append GOPATH's bin dir to GITHUB_PATH. */
@@ -805,7 +806,7 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     }
   });
 
-  it('narrows the push-to-main run — an intensity knob, not a correctness invariant', () => {
+  it('keeps routine pushes narrow and validates both Node versions on demand', () => {
     // A squash merge keeps the tree byte-identical to the pull_request head
     // (verified on PRs #128, #130, #131, #132), so a push to `main` need
     // not repeat both legs and the container build the pull request
@@ -813,11 +814,23 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     // `if` cannot read `matrix` — doing that invalidates the workflow.
     const quality = jobOf(ci, 'quality');
     expect(matrixExpression(quality?.matrix)).toMatch(
-      /^\$\{\{ github\.event_name == 'pull_request' && fromJSON\('\[22, 24\]'\) \|\| fromJSON\('\[22\]'\) \}\}$/,
+      /^\$\{\{ github\.event_name == 'push' && fromJSON\('\[22\]'\) \|\| fromJSON\('\[22, 24\]'\) \}\}$/,
     );
-    const arms = matrixArms(quality?.matrix);
-    expect(arms[0], 'a pull_request run must keep both legs').toEqual(['22', '24']);
-    expect(arms[1], 'a push to main runs the floor version only').toEqual(['22']);
+    const [push, full] = matrixArms(quality?.matrix);
+    expect(push, 'a push to main runs the floor version only').toEqual(['22']);
+    expect(full, 'pull_request and workflow_dispatch both run the full matrix').toEqual([
+      '22',
+      '24',
+    ]);
+
+    const workflow = parse(ci.text) as {
+      on: Record<string, unknown>;
+      concurrency: { group: string };
+    };
+    expect(workflow.on).toHaveProperty('workflow_dispatch');
+    expect(workflow.concurrency.group).toContain(
+      "github.event_name == 'workflow_dispatch' && github.run_id || github.ref",
+    );
   });
 });
 
