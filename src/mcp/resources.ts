@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Logger } from '../logger.js';
 import { CORPUS_RECEIPT_LIMIT } from '../core/changes.js';
 import { ServiceError } from '../core/errors.js';
+import { normalizePartNumber, PART_NUMBER_PATTERN } from '../core/part-number.js';
 import type { CFRService } from '../core/service.js';
 import { DEFAULT_TITLE } from '../core/titles.js';
 import { clientSafeMessage } from './client-safe.js';
@@ -159,7 +160,10 @@ export function registerResources(server: McpServer, service: CFRService, logger
           .describe('the benefits/regulatory topic to research'),
         part: z
           .string()
-          .regex(/^\d{1,3}$/)
+          .regex(PART_NUMBER_PATTERN)
+          // The canonical spelling, so the scope the prompt names is the one
+          // the index holds.
+          .transform(normalizePartNumber)
           .optional()
           .describe('restrict to one CFR part, e.g. "4"'),
       },
@@ -205,7 +209,10 @@ export function registerResources(server: McpServer, service: CFRService, logger
           .describe('the claim issue to evaluate, e.g. "PTSD rating criteria"'),
         part: z
           .string()
-          .regex(/^\d{1,3}$/)
+          .regex(PART_NUMBER_PATTERN)
+          // The canonical spelling, so the scope the prompt names is the one
+          // the index holds.
+          .transform(normalizePartNumber)
           .optional()
           .describe('restrict to one CFR part, e.g. "4"'),
         citation: z

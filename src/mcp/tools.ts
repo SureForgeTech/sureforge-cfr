@@ -7,6 +7,7 @@ import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
 import { ARCHIVE_FLOOR } from '../core/archive.js';
 import { historicalSection } from '../core/historical.js';
+import { PART_NUMBER_PATTERN } from '../core/part-number.js';
 import {
   compareSnapshots,
   SNAPSHOT_RESPONSE_CHAR_BUDGET,
@@ -439,7 +440,7 @@ export function registerTools(
           .describe('results per page (default 10, max 20)'),
         part: z
           .string()
-          .regex(/^\d{1,3}$/)
+          .regex(PART_NUMBER_PATTERN)
           .optional()
           .describe('restrict to one CFR part number'),
         kind: z
@@ -716,7 +717,7 @@ export function registerTools(
           .describe('path to the later stored snapshot, e.g. "snapshots/2026-06-01.sqlite"'),
         part: z
           .string()
-          .regex(/^\d{1,3}$/)
+          .regex(PART_NUMBER_PATTERN)
           .optional()
           .describe('restrict the comparison to one CFR part number'),
       },

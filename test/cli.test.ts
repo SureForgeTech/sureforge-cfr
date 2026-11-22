@@ -353,6 +353,53 @@ describe('main', () => {
     }
   });
 
+  it('reads a CLI --part filter spelled with leading zeros as the same part', async () => {
+    const fromTemp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.1', text: 'Old part 4.' }),
+        makeSection({
+          citation: '17.1',
+          part: '17',
+          subpart: null,
+          path: '/title:38/chapter:I/part:17',
+          text: 'Old part 17.',
+        }),
+      ],
+      issueDate: '2026-01-01',
+    });
+    const toTemp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.1', text: 'New part 4.' }),
+        makeSection({
+          citation: '17.1',
+          part: '17',
+          subpart: null,
+          path: '/title:38/chapter:I/part:17',
+          text: 'New part 17.',
+        }),
+      ],
+      issueDate: '2026-02-01',
+    });
+    const fromPath = path.join(fromTemp.dir, 'from.sqlite');
+    const toPath = path.join(toTemp.dir, 'to.sqlite');
+    fromTemp.store.backupTo(fromPath);
+    toTemp.store.backupTo(toPath);
+    const { out, io } = makeIo({}, createTestLogger());
+    try {
+      // "04" is part 4: unnormalized it would match no row, and the
+      // comparison would answer "nothing changed".
+      const code = await main(['compare', fromPath, toPath, '--part', '04'], io);
+      expect(code).toBe(0);
+      const printed = out.join('');
+      expect(printed).toContain('part: 4');
+      expect(printed).toContain('- 4.1 —');
+      expect(printed).not.toContain('- 17.1 —');
+    } finally {
+      fromTemp.cleanup();
+      toTemp.cleanup();
+    }
+  });
+
   it('applies the CLI compare --part filter', async () => {
     const fromTemp = openTempStore({
       sections: [

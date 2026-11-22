@@ -6,6 +6,7 @@ import { runMcpCommand } from './commands/mcp.js';
 import { runMcpInstallCommand } from './commands/mcp-install.js';
 import { runServeCommand } from './commands/serve.js';
 import { runSyncCommand } from './commands/sync.js';
+import { PART_NUMBER_PATTERN } from './core/part-number.js';
 import { runExportCommand } from './commands/export.js';
 import { formatSnapshotComparison, runCompareCommand } from './commands/compare.js';
 import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
@@ -345,7 +346,7 @@ function parseDiffArgs(rest: readonly string[]): ParsedCommand {
 
 /** A CFR part number, checked before any snapshot is opened. */
 function parseComparePart(raw: string): string {
-  if (!/^\d{1,3}$/.test(raw)) {
+  if (!PART_NUMBER_PATTERN.test(raw)) {
     throw new CliError(`compare --part must be a CFR part number such as 4, got: ${raw}`);
   }
   return raw;

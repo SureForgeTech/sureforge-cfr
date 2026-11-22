@@ -215,6 +215,41 @@ describe('compareSnapshots', () => {
     }
   });
 
+  it('reads a part filter spelled with leading zeros as the same part', () => {
+    const fixture = snapshotDir();
+    try {
+      const from = path.join(fixture.dir, 'from.sqlite');
+      const to = path.join(fixture.dir, 'to.sqlite');
+      const sections = (part: string, body: string) => [
+        makeSection({
+          citation: `${part}.1`,
+          part,
+          subpart: null,
+          path: `/title:38/chapter:I/part:${part}`,
+          text: body,
+        }),
+      ];
+      writeSnapshot(
+        from,
+        [...sections('4', 'Old part 4.'), ...sections('17', 'Old part 17.')],
+        FROM_DATE,
+      );
+      writeSnapshot(
+        to,
+        [...sections('4', 'New part 4.'), ...sections('17', 'New part 17.')],
+        TO_DATE,
+      );
+
+      // "04" is part 4. Unnormalized it would match no row, and the
+      // comparison would answer "nothing changed" for a part that changed.
+      const result = compareSnapshots({ logger: createTestLogger() }, from, to, { part: '04' });
+      expect(result.part).toBe('4');
+      expect(result.changed.map((change) => change.citation)).toEqual(['4.1']);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   it('caps every category at the change-list bound and reports truncation', () => {
     const fixture = snapshotDir();
     try {
