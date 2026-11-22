@@ -576,10 +576,30 @@ describe('Titan HTTP request-size caps', () => {
     expect(paramResponse.status).toBe(400);
     expect(((await paramResponse.json()) as Json)['error']).toBe('invalid_input');
 
-    // oversized part parameter
-    const partResponse = await fetch(`${base}/api/v1/search?q=mental&part=${'1'.repeat(20)}`);
+    // oversized part parameter: past the byte cap, so the router answers
+    // before the schema sees it
+    const partResponse = await fetch(`${base}/api/v1/search?q=mental&part=${'1'.repeat(100)}`);
     expect(partResponse.status).toBe(400);
     expect(((await partResponse.json()) as Json)['message']).toContain('part exceeds');
+
+    // A part within the documented 20-char limit is the schema's to judge,
+    // not the byte cap's: an unresolvable one is a 404, never a 400.
+    const longPart = await fetch(`${base}/api/v1/browse?chapter=I&part=${'1'.repeat(20)}`);
+    expect(longPart.status).toBe(404);
+
+    // The cap measures the value the schema sees, which is TRIMMED: 80 spaces
+    // before a part the schema accepts are 80 raw bytes the schema never
+    // reads, so the guard must not turn that documented request into a 400.
+    const paddedPart = encodeURIComponent(`${' '.repeat(80)}${'1'.repeat(20)}`);
+    const paddedResponse = await fetch(`${base}/api/v1/browse?chapter=I&part=${paddedPart}`);
+    expect(paddedResponse.status).toBe(404);
+
+    // `q` is measured the same way: 900 spaces before a legal query are 906
+    // raw bytes but a 6-byte query to the schema, and the URL stays under
+    // MAX_URL_BYTES because the form encodes a space as one `+`.
+    const paddedQ = new URLSearchParams({ q: `${' '.repeat(900)}mental` }).toString();
+    const paddedQResponse = await fetch(`${base}/api/v1/search?${paddedQ}`);
+    expect(paddedQResponse.status).toBe(200);
 
     // whole URL above 2048 bytes → 414 before validation
     const hugeResponse = await fetch(`${base}/api/v1/search?q=${'y'.repeat(3000)}`);

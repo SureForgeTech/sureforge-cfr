@@ -58,11 +58,13 @@ const API_INDEX_PATH = '/api/v1';
 const OPENAPI_PATH = '/openapi.yaml';
 
 // Router-level request-size caps, enforced before validation: zod already
-// bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 3 digits, so
-// these only kill pathological requests (megabyte URLs) one layer earlier.
+// bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 20 chars
+// (≤ 80 UTF-8 bytes), so these only kill pathological requests (megabyte
+// URLs) one layer earlier. The schema, not this guard, is the contract — a
+// cap tighter than the schema's turns a documented request into a 400.
 const MAX_URL_BYTES = 2048;
 const MAX_QUERY_BYTES = 800;
-const MAX_PART_BYTES = 10;
+const MAX_PART_BYTES = 80;
 /** Default {@link HttpServerOptions.maxConcurrentUpstream}: 4 concurrent eCFR-fetching handlers. */
 const DEFAULT_MAX_CONCURRENT_UPSTREAM = 4;
 
@@ -308,14 +310,21 @@ function parseOptionalInt(raw: string | null): number | undefined {
   return Number(raw);
 }
 
-/** First oversized query parameter, or null when every cap holds. */
+/**
+ * First oversized query parameter, or null when every cap holds.
+ *
+ * Measured on the TRIMMED value, because the schemas trim before they bound:
+ * a part of eighty spaces followed by `4` is a legal `4` to the schema, and a
+ * guard that measured the raw bytes would answer `400` for a request the
+ * contract admits. The raw size is still bounded by {@link MAX_URL_BYTES}.
+ */
 function oversizedParam(url: URL): string | null {
-  const q = url.searchParams.get('q');
-  if (q !== null && Buffer.byteLength(q, 'utf8') > MAX_QUERY_BYTES) {
+  const q = url.searchParams.get('q')?.trim();
+  if (q !== undefined && q !== '' && Buffer.byteLength(q, 'utf8') > MAX_QUERY_BYTES) {
     return `q exceeds ${MAX_QUERY_BYTES} bytes`;
   }
-  const part = url.searchParams.get('part');
-  if (part !== null && Buffer.byteLength(part, 'utf8') > MAX_PART_BYTES) {
+  const part = url.searchParams.get('part')?.trim();
+  if (part !== undefined && part !== '' && Buffer.byteLength(part, 'utf8') > MAX_PART_BYTES) {
     return `part exceeds ${MAX_PART_BYTES} bytes`;
   }
   return null;

@@ -374,6 +374,15 @@ describe('CFRService.browse', () => {
     });
   });
 
+  it('reads a zero-padded part in its canonical spelling', () => {
+    withService((service) => {
+      const padded = service.browse({ chapter: 'I', part: '04' });
+      const canonical = service.browse({ chapter: 'I', part: '4' });
+      expect(padded.node).toEqual(canonical.node);
+      expect(padded.node.type).toBe('part');
+    });
+  });
+
   it('says a part needs its chapter when asked for directly under the title', () => {
     withService((service) => {
       try {
