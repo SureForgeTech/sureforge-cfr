@@ -408,6 +408,42 @@ describe('main', () => {
     }
   });
 
+  it('names the titles an export covered when it covered more than one', async () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.1', text: 'Title 38 body.' }),
+        makeSection({ title: 12, citation: '1026.1', text: 'Title 12 body.' }),
+      ],
+      issueDate: '2026-01-01',
+    });
+    const target = path.join(temp.dir, 'dump.md');
+    try {
+      const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
+      const code = await main(['export', target, 'md'], io);
+      expect(code).toBe(EXIT.OK);
+      const printed = out.join('');
+      // The export writes EVERY stored title's rows, so the line says which
+      // titles it covered.
+      expect(printed).toContain('exported 2 provisions from Titles 12 and 38 as md');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps a single-title export line exactly as it was', async () => {
+    const temp = openTempStore({ issueDate: '2026-01-01' });
+    const target = path.join(temp.dir, 'dump.md');
+    try {
+      const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
+      const code = await main(['export', target, 'md'], io);
+      expect(code).toBe(EXIT.OK);
+      // A pipeline may parse this line: a single-title export keeps it.
+      expect(out.join('')).toMatch(/^exported \d+ provisions as md \(\d+ bytes\) to /);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('applies the CLI compare --part filter', async () => {
     const fromTemp = openTempStore({
       sections: [

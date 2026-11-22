@@ -1125,6 +1125,21 @@ export class Store {
   }
 
   /**
+   * Every CFR title the store holds rows for, ascending.
+   *
+   * The export path uses this: an export carries EVERY title's rows, so the
+   * report that names the export must name the titles it covered — an export
+   * of a multi-title index is not an export of one title.
+   */
+  storedTitles(): number[] {
+    const rows = this.stmt('SELECT DISTINCT title FROM sections ORDER BY title').all() as Record<
+      string,
+      unknown
+    >[];
+    return rows.map((row) => Number(row['title']));
+  }
+
+  /**
    * Per-kind provision counts for one title (default {@link DEFAULT_TITLE})
    * — the verification read path. `SUM(kind = …)` yields NULL for a title
    * with no rows, so the counts fall back to 0.

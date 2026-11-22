@@ -18,6 +18,14 @@ export interface ExportReport {
   readonly format: 'sqlite' | 'jsonl' | 'md';
   /** Provisions (sections + appendices) written to the file. */
   readonly provisions: number;
+  /**
+   * Every CFR title the export covered, ascending.
+   *
+   * The export writes EVERY stored title's rows, so a report that names the
+   * export has to name the titles it covered: an export of a multi-title
+   * index is not an export of one title.
+   */
+  readonly titles: readonly number[];
 }
 
 /**
@@ -91,7 +99,7 @@ function titleIssueDate(store: Store, title: number): string {
  * documents are answered before this is called — so `slice` keeps both ends
  * non-empty and neither can be undefined.
  */
-function titleList(titles: readonly number[]): string {
+export function formatTitleList(titles: readonly number[]): string {
   return `Titles ${titles.slice(0, -1).join(', ')} and ${titles.slice(-1).join(', ')}`;
 }
 
@@ -124,7 +132,7 @@ function markdownHeader(store: Store, rows: readonly SectionRow[]): string {
     )})\n`;
   }
   const dates = titles.map((title) => `${title} = ${titleIssueDate(store, title)}`).join(', ');
-  return `# Code of Federal Regulations — ${titleList(titles)} (issue dates: ${dates})\n`;
+  return `# Code of Federal Regulations — ${formatTitleList(titles)} (issue dates: ${dates})\n`;
 }
 
 /**
@@ -180,6 +188,22 @@ function snapshotExclusive(store: Store, target: string): void {
       // never created, or already gone
     }
   }
+}
+
+/**
+ * The export command's one-line report.
+ *
+ * The export writes EVERY stored title's rows, so the line names the titles
+ * it covered when there is more than one — an export of a multi-title index
+ * is not an export of one title. A single-title export keeps the line it has
+ * always had, byte for byte: a pipeline may parse it.
+ */
+export function formatExportReport(report: ExportReport): string {
+  const scope = report.titles.length > 1 ? ` from ${formatTitleList(report.titles)}` : '';
+  return (
+    `exported ${report.provisions} provisions${scope} as ${report.format} ` +
+    `(${report.bytes} bytes) to ${report.path}\n`
+  );
 }
 
 function writeExclusive(target: string, text: string): void {
@@ -252,6 +276,7 @@ export function runExportCommand(
   // adopts a schema, same contract as the diff command.
   const store = Store.open(config.indexPath);
   let provisions: number;
+  let titles: number[];
   try {
     if (format === undefined) {
       snapshotExclusive(store, target);
@@ -261,11 +286,12 @@ export function runExportCommand(
     } else {
       provisions = writeMarkdown(store, target);
     }
+    titles = store.storedTitles();
   } finally {
     store.close();
   }
   const bytes = statSync(target).size;
   const reportFormat: ExportReport['format'] = format ?? 'sqlite';
-  logger.info('index exported', { target, bytes, format: reportFormat, provisions });
-  return { path: target, bytes, format: reportFormat, provisions };
+  logger.info('index exported', { target, bytes, format: reportFormat, provisions, titles });
+  return { path: target, bytes, format: reportFormat, provisions, titles };
 }
