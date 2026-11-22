@@ -416,15 +416,22 @@ describe('main', () => {
       ],
       issueDate: '2026-01-01',
     });
-    const target = path.join(temp.dir, 'dump.md');
     try {
-      const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
-      const code = await main(['export', target, 'md'], io);
-      expect(code).toBe(EXIT.OK);
-      const printed = out.join('');
-      // The export writes EVERY stored title's rows, so the line says which
-      // titles it covered.
-      expect(printed).toContain('exported 2 provisions from Titles 12 and 38 as md');
+      for (const format of ['md', 'jsonl', undefined] as const) {
+        const target = path.join(temp.dir, `dump-${format ?? 'sqlite'}`);
+        const { out, io } = makeIo({ CFR_INDEX_PATH: temp.indexPath });
+        const code = await main(
+          format === undefined ? ['export', target] : ['export', target, format],
+          io,
+        );
+        expect(code, format).toBe(EXIT.OK);
+        const printed = out.join('');
+        // The export writes EVERY stored title's rows, so the line says which
+        // titles it covered — in every format.
+        expect(printed, format).toContain(
+          `exported 2 provisions from Titles 12 and 38 as ${format ?? 'sqlite'}`,
+        );
+      }
     } finally {
       temp.cleanup();
     }

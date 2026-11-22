@@ -67,11 +67,11 @@ function toJsonlLine(row: SectionRow): string {
  * reconcile with the refuse-to-overwrite contract). No pretty-printing:
  * compact lines are the ingest contract.
  */
-function writeJsonl(store: Store, target: string): number {
+function writeJsonl(store: Store, target: string): ExportContents {
   const rows = store.allSections();
   const chunks: string[] = rows.map(toJsonlLine);
   writeExclusive(target, chunks.join(''));
-  return rows.length;
+  return { provisions: rows.length, titles: titlesOf(rows) };
 }
 
 /**
@@ -99,8 +99,13 @@ function titleIssueDate(store: Store, title: number): string {
  * documents are answered before this is called — so `slice` keeps both ends
  * non-empty and neither can be undefined.
  */
-export function formatTitleList(titles: readonly number[]): string {
+function formatTitleList(titles: readonly number[]): string {
   return `Titles ${titles.slice(0, -1).join(', ')} and ${titles.slice(-1).join(', ')}`;
+}
+
+/** Every title the given rows carry, ascending. */
+function titlesOf(rows: readonly SectionRow[]): number[] {
+  return [...new Set(rows.map((row) => row.title))].sort((a, b) => a - b);
 }
 
 /**
@@ -117,7 +122,7 @@ export function formatTitleList(titles: readonly number[]): string {
  * several names them all.
  */
 function markdownHeader(store: Store, rows: readonly SectionRow[]): string {
-  const titles = [...new Set(rows.map((row) => row.title))].sort((a, b) => a - b);
+  const titles = titlesOf(rows);
   const first = titles[0];
   if (first === undefined) {
     // No rows: there is no title to name, so the legacy line stands.
@@ -136,14 +141,27 @@ function markdownHeader(store: Store, rows: readonly SectionRow[]): string {
 }
 
 /**
+ * What an export wrote: how many provisions, and the titles they came from.
+ *
+ * The two come from the SAME read, so the report describes the artifact that
+ * was written: a concurrent sync cannot make the count and the title list
+ * disagree.
+ */
+interface ExportContents {
+  readonly provisions: number;
+  readonly titles: readonly number[];
+}
+
+/**
  * Write one Markdown document: a header naming every title the document
  * holds, each with that title's recorded issue date, then each provision as
  * a `## {citation} — {heading}` section with its `text` verbatim (never
- * fenced, never reflowed) and a `---` separator. Returns the row count.
+ * fenced, never reflowed) and a `---` separator. Returns the row count and
+ * the titles those rows carry.
  *
  * Same chunk-array + single-write choice (and peak) as {@link writeJsonl}.
  */
-function writeMarkdown(store: Store, target: string): number {
+function writeMarkdown(store: Store, target: string): ExportContents {
   const rows = store.allSections();
   const chunks: string[] = [markdownHeader(store, rows)];
   for (const row of rows) {
@@ -158,7 +176,7 @@ function writeMarkdown(store: Store, target: string): number {
     chunks.push(`\n## ${label} — ${row.heading}\n${body}\n---\n`);
   }
   writeExclusive(target, chunks.join(''));
-  return rows.length;
+  return { provisions: rows.length, titles: titlesOf(rows) };
 }
 
 /**
@@ -275,23 +293,35 @@ export function runExportCommand(
   // STRICT open (no allowSchemaUpgrade): the read-only export path never
   // adopts a schema, same contract as the diff command.
   const store = Store.open(config.indexPath);
-  let provisions: number;
-  let titles: number[];
+  let contents: ExportContents;
   try {
     if (format === undefined) {
       snapshotExclusive(store, target);
-      provisions = store.countAllSections();
+      // The snapshot copies the WHOLE file, so its provisions and its titles
+      // are the store's — read after the copy, as the count always was.
+      contents = { provisions: store.countAllSections(), titles: store.storedTitles() };
     } else if (format === 'jsonl') {
-      provisions = writeJsonl(store, target);
+      contents = writeJsonl(store, target);
     } else {
-      provisions = writeMarkdown(store, target);
+      contents = writeMarkdown(store, target);
     }
-    titles = store.storedTitles();
   } finally {
     store.close();
   }
   const bytes = statSync(target).size;
   const reportFormat: ExportReport['format'] = format ?? 'sqlite';
-  logger.info('index exported', { target, bytes, format: reportFormat, provisions, titles });
-  return { path: target, bytes, format: reportFormat, provisions, titles };
+  logger.info('index exported', {
+    target,
+    bytes,
+    format: reportFormat,
+    provisions: contents.provisions,
+    titles: contents.titles,
+  });
+  return {
+    path: target,
+    bytes,
+    format: reportFormat,
+    provisions: contents.provisions,
+    titles: contents.titles,
+  };
 }
