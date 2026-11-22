@@ -1112,16 +1112,20 @@ export class Store {
   }
 
   /**
-   * How many rows the whole store holds, every title included.
+   * How many rows the whole store holds, and every title it holds, in ONE
+   * statement.
    *
-   * The export path uses this: a snapshot copy carries EVERY title's rows,
-   * so the count it reports must be the count of what it wrote, not one
-   * title's slice.
+   * The export path uses this: an export carries EVERY title's rows, so the
+   * report that describes it must name the titles and the count of the SAME
+   * revision — and two statements could straddle a concurrent sync.
    */
-  countAllSections(): number {
-    const row = this.stmt('SELECT count(*) AS n FROM sections').get() as
-      Record<string, unknown> | undefined;
-    return row ? Number(row['n'] ?? 0) : 0;
+  storeSummary(): { readonly provisions: number; readonly titles: number[] } {
+    const rows = this.stmt(
+      'SELECT title, count(*) AS n FROM sections GROUP BY title ORDER BY title',
+    ).all() as Record<string, unknown>[];
+    const titles = rows.map((row) => Number(row['title']));
+    const provisions = rows.reduce((sum, row) => sum + Number(row['n'] ?? 0), 0);
+    return { provisions, titles };
   }
 
   /**

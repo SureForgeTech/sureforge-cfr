@@ -458,7 +458,10 @@ every read names the authority it answers with:
   the per-title key `title.<N>.issue_date`; the legacy `issue_date` key is
   Title 38's fallback, and only Title 38's. A document holding only Title 38
   therefore keeps the header it has always had, byte for byte, whenever the
-  two keys agree — which is what every sync records.) Making the surfaces above
+  two keys agree — which is what every sync records. The export's own line
+  names the titles it covered when it covered more than one, so a multi-title
+  export never reads as an export of one title; a single-title export keeps
+  the line it has always had.) Making the surfaces above
   title-scoped is a separate change.
 - `indexIssueDate` and `indexStale` describe Title 38's freshness; the
   stale-index warning's point-in-time URL names the title the answer is

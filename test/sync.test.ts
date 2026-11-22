@@ -887,7 +887,7 @@ describe('syncIndex multi-title (Title 32)', () => {
       // The seeded Title 38 rows survived the scoped rebuild.
       expect(temp.store.countSections()).toBe(FIXTURE_SECTIONS.length);
       expect(temp.store.countSections(32)).toBe(1);
-      expect(temp.store.countAllSections()).toBe(FIXTURE_SECTIONS.length + 1);
+      expect(temp.store.storeSummary().provisions).toBe(FIXTURE_SECTIONS.length + 1);
       const stored32 = temp.store.getSection('70.3', 'section', 32);
       expect(stored32?.title).toBe(32);
       expect(stored32?.issueDate).toBe(TITLE_32_ISSUE_DATE);

@@ -957,6 +957,32 @@ describe('Store citationSupport (Structural Citation Support, design doc §3.1)'
 });
 
 describe('Store multi-title (schema v3)', () => {
+  it('summarizes the whole store: every title, and the count that goes with it', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '3.1', heading: 'Veterans benefits general.' }),
+        makeSection({ citation: '3.1', title: 32, heading: 'Defense property management.' }),
+        makeSection({ citation: '70.1', title: 32, heading: 'Another Title 32 row.' }),
+      ],
+    });
+    try {
+      // One statement: the count and the titles are of the SAME revision, so
+      // they cannot describe two different stores.
+      expect(temp.store.storeSummary()).toEqual({ provisions: 3, titles: [32, 38] });
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('summarizes an empty store as no rows and no titles', () => {
+    const temp = openTempStore({ seed: false });
+    try {
+      expect(temp.store.storeSummary()).toEqual({ provisions: 0, titles: [] });
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('stores the same citation in two titles under the (title, citation) key', () => {
     const temp = openTempStore({
       sections: [
@@ -969,7 +995,7 @@ describe('Store multi-title (schema v3)', () => {
       expect(temp.store.countSections()).toBe(1);
       expect(temp.store.countSections(32)).toBe(1);
       // The whole store holds both authorities.
-      expect(temp.store.countAllSections()).toBe(2);
+      expect(temp.store.storeSummary().provisions).toBe(2);
       // Default reads scope to Title 38; the title parameter selects 32.
       expect(temp.store.getSection('3.1', 'section')?.heading).toBe('Veterans benefits general.');
       expect(temp.store.getSection('3.1', 'section', 32)?.heading).toBe(
