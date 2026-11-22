@@ -195,6 +195,14 @@ describe('parseArgs', () => {
       toPath: 'new.sqlite',
       part: '17',
     });
+    // A part spelled with leading zeros names the same part: the CLI reads
+    // it in the canonical spelling, as the search's parser does.
+    expect(parseArgs(['compare', 'old.sqlite', 'new.sqlite', '--part', '04'])).toEqual({
+      command: 'compare',
+      fromPath: 'old.sqlite',
+      toPath: 'new.sqlite',
+      part: '4',
+    });
   });
 
   it('rejects compare without two snapshots, with extra args, or with unknown options', () => {

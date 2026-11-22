@@ -42,9 +42,11 @@ describe('the shared part-number rule', () => {
     expect(normalizePartNumber('')).toBe('');
   });
 
-  it('is the one place the shape of a part filter lives', () => {
+  it('keeps the shape of a part filter in one module', () => {
     // The schemas and the CLI take the pattern from here, so a second copy
-    // cannot appear without a failing test.
+    // cannot appear without a failing test. The scan reads the PATTERN's
+    // source text, so a copy written as a literal or built with
+    // `new RegExp` is caught alike.
     expect(PART_NUMBER_PATTERN.test('4')).toBe(true);
     expect(PART_NUMBER_PATTERN.test('04')).toBe(true);
     expect(PART_NUMBER_PATTERN.test('four')).toBe(false);
@@ -63,7 +65,7 @@ describe('the shared part-number rule', () => {
           continue;
         }
         if (!entry.name.endsWith('.ts') || allowed.has(entry.name)) continue;
-        if (readFileSync(full, 'utf8').includes('/^\\d{1,3}$/')) offenders.push(full);
+        if (readFileSync(full, 'utf8').includes('d{1,3}$')) offenders.push(full);
       }
     };
     walk(srcDir);
