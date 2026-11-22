@@ -1,4 +1,15 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { CommandError, EXIT } from '../exit-codes.js';
@@ -196,14 +207,107 @@ export function installClientConfig(
   mcpServers['cfr-free'] = MCP_ENTRY;
   config['mcpServers'] = mcpServers;
 
+  const mode = isCreated ? undefined : writableMode(targetPath);
   const parentDir = path.dirname(targetPath);
   mkdirSync(parentDir, { recursive: true });
-  writeFileSync(targetPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  writeConfigAtomically(targetPath, JSON.stringify(config, null, 2) + '\n', mode);
 
   return {
     updated: true,
     status: isCreated ? 'created' : 'updated',
   };
+}
+
+/**
+ * The permission bits of a config that is already there, refusing one this
+ * process may not write.
+ *
+ * Two facts live here. `rename` REPLACES the target, and the replacement's
+ * mode is the one that survives — so the original bits are carried over and
+ * the installer's effect on a file it updates stays what it was. And a
+ * rename needs write permission on the DIRECTORY, not on the file, so an
+ * atomic write would silently replace a config the user had made read-only;
+ * the explicit check keeps the old outcome (an error, file intact) for that
+ * case instead of silently succeeding.
+ *
+ * @throws {Error} when the existing file is not writable (exit 1, as the
+ *   in-place write did).
+ */
+function writableMode(targetPath: string): number | undefined {
+  let mode: number;
+  try {
+    mode = statSync(targetPath).mode & 0o777;
+    accessSync(targetPath, constants.W_OK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    // A plain Error, not a CommandError: the file is readable but not
+    // writable, so this is the same "write failed" outcome the in-place
+    // write used to produce (exit 1), not the exit-5 refusal for a config
+    // that cannot be understood.
+    throw new Error(
+      `cannot write ${targetPath} — the config is read-only; fix its permissions or remove it first`,
+      { cause: error },
+    );
+  }
+  return mode;
+}
+
+/**
+ * Replace `targetPath` with `contents` in one step.
+ *
+ * A bare `writeFileSync` truncates the target before it writes, so a crash,
+ * a full disk or a killed process leaves the reader with a half-written
+ * client config — and this command refuses to rewrite a config it cannot
+ * parse, so a torn write would leave a file it will not repair. Writing a
+ * sibling temp file and renaming it into place is atomic on the same
+ * filesystem: the config is either untouched or fully replaced.
+ *
+ * `flag: 'wx'` REFUSES an existing temp path rather than opening it. Without
+ * that, a pre-created symlink at the predictable temp name would redirect
+ * the write to whatever it points at. The temp name carries the pid so two
+ * concurrent runs do not collide, and nothing is removed unless this call
+ * created it.
+ *
+ * A target that is a SYMLINK is written through to the file it points at:
+ * the in-place write followed the link, and users keep these configs in
+ * dotfiles repositories. Renaming onto the link would replace it with a
+ * regular file and quietly detach the config from wherever it is tracked.
+ */
+function writeConfigAtomically(
+  targetPath: string,
+  contents: string,
+  mode: number | undefined,
+): void {
+  const destination = resolveWriteTarget(targetPath);
+  const tempPath = `${destination}.${process.pid}.cfr-free.tmp`;
+  let created = false;
+  try {
+    writeFileSync(tempPath, contents, { encoding: 'utf8', flag: 'wx', mode: mode ?? 0o666 });
+    created = true;
+    // `mode` at creation is masked by the process umask, so an existing
+    // 0664 config would come back 0644. Set the bits explicitly instead.
+    if (mode !== undefined) chmodSync(tempPath, mode);
+    renameSync(tempPath, destination);
+  } catch (error) {
+    if (created) rmSync(tempPath, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * The path a rename should target: the real file when `targetPath` is an
+ * existing symlink, and `targetPath` itself otherwise.
+ *
+ * `realpathSync` also collapses `.`/`..` and any other link in the path, so
+ * it is only consulted for a target that already exists; a new config keeps
+ * the path the caller named (its parent may not exist yet).
+ */
+function resolveWriteTarget(targetPath: string): string {
+  try {
+    return realpathSync(targetPath);
+  } catch {
+    return targetPath;
+  }
 }
 
 /** Execute the `cfr-free mcp install` command. */

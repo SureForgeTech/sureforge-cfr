@@ -1,4 +1,15 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -81,6 +92,17 @@ describe('mcp-install', () => {
       const servers = content['mcpServers'] as Record<string, unknown>;
       expect(servers['other']).toEqual({ command: 'other-cmd' });
       expect(servers['cfr-free']).toBeDefined();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves no temp file behind after a successful write', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-atomic-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      installClientConfig('cursor', target);
+      expect(readdirSync(tempDir)).toEqual(['mcp.json']);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
@@ -174,6 +196,95 @@ describe('mcp-install', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === 'win32')('keeps the mode of a config it updates', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-mode-'));
+    try {
+      const target = path.join(tempDir, 'mcp.json');
+      writeFileSync(target, '{"mcpServers":{}}\n', 'utf8');
+      // 0664 is not what the umask leaves behind, so a temp file that only
+      // carried the bits through `writeFileSync`'s `mode` would not match.
+      chmodSync(target, 0o664);
+      installClientConfig('cursor', target);
+      expect(statSync(target).mode & 0o777).toBe(0o664);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'writes through a symlinked config instead of replacing the link',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-link-'));
+      try {
+        // Dotfile setups keep the real config in a tracked directory and
+        // symlink the client's path at it; a rename onto the LINK would leave
+        // the tracked file untouched and the user's setup broken.
+        const real = path.join(tempDir, 'real.json');
+        writeFileSync(real, '{"mcpServers":{"other":{"command":"x"}}}\n', 'utf8');
+        const link = path.join(tempDir, 'mcp.json');
+        symlinkSync(real, link);
+
+        installClientConfig('cursor', link);
+
+        expect(lstatSync(link).isSymbolicLink()).toBe(true);
+        const content = JSON.parse(readFileSync(real, 'utf8')) as Record<string, unknown>;
+        const servers = content['mcpServers'] as Record<string, unknown>;
+        expect(servers['other']).toEqual({ command: 'x' });
+        expect(servers['cfr-free']).toBeDefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a read-only config instead of replacing it through the rename',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-readonly-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const original = '{"mcpServers":{"other":{"command":"x"}}}\n';
+        writeFileSync(target, original, 'utf8');
+        // The rename needs write permission on the DIRECTORY only, so without
+        // an explicit check this read-only file would be replaced silently.
+        chmodSync(target, 0o444);
+
+        let caught: unknown;
+        try {
+          installClientConfig('cursor', target);
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(Error);
+        expect((caught as Error).message).toContain('read-only');
+        chmodSync(target, 0o644);
+        expect(readFileSync(target, 'utf8')).toBe(original);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a pre-created temp path instead of writing through it',
+    () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-symlink-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const victim = path.join(tempDir, 'victim.txt');
+        writeFileSync(victim, 'untouched\n', 'utf8');
+        // The temp name is predictable; a hostile or accidental file sitting
+        // there must fail the install, not receive the config.
+        symlinkSync(victim, `${target}.${process.pid}.cfr-free.tmp`);
+        expect(() => installClientConfig('cursor', target)).toThrow();
+        expect(readFileSync(victim, 'utf8')).toBe('untouched\n');
+        expect(existsSync(target)).toBe(false);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('supports --print mode without writing files', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-print-'));
