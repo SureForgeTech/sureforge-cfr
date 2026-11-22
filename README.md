@@ -551,14 +551,14 @@ MCP's JSON-RPC protocol.
 
 ### Exit codes
 
-| Code | Meaning                                                                       |
-| ---- | ----------------------------------------------------------------------------- |
-| `0`  | Success                                                                       |
-| `1`  | Generic error (sync failure, corrupt index, …)                                |
-| `2`  | Usage or configuration error                                                  |
-| `3`  | Index unavailable (empty, and auto-sync disabled)                             |
-| `4`  | HTTP port could not be bound (in use or permission denied)                    |
-| `5`  | Refused to overwrite an existing export file (remove it or pick another path) |
+| Code | Meaning                                                                                                                                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success                                                                                                                                           |
+| `1`  | Generic error (sync failure, corrupt index, …)                                                                                                    |
+| `2`  | Usage or configuration error                                                                                                                      |
+| `3`  | Index unavailable (empty, and auto-sync disabled)                                                                                                 |
+| `4`  | HTTP port could not be bound (in use or permission denied)                                                                                        |
+| `5`  | Refused to overwrite a file it would destroy: an existing export target, or an MCP client config it cannot parse (remove it or pick another path) |
 
 Scripts can branch on these — e.g. retry later on `3`, pick another port
 on `4`. `cfr-free verify` adds one meaning to `1`: the file opened, but the
