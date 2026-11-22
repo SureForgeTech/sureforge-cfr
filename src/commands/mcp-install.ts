@@ -270,7 +270,9 @@ function writableMode(targetPath: string): number | undefined {
  *
  * The rename is a DIRECTORY operation, so replacing the file needs write
  * permission on its directory even when the file itself is writable; that is
- * stated in SPEC, because the old in-place write did not need it.
+ * stated in SPEC, because the old in-place write did not need it. The
+ * directory is synced after the rename for the same reason the file is
+ * synced before it: the entry must reach the disk too.
  *
  * `flag: 'wx'` REFUSES an existing temp path rather than opening it. Without
  * that, a pre-created symlink at the predictable temp name would redirect
@@ -311,6 +313,13 @@ function writeConfigAtomically(
     // 0664 config would come back 0644. Set the bits explicitly instead.
     if (mode !== undefined) chmodSync(tempPath, mode);
     renameSync(tempPath, destination);
+    // The rename publishes the NAME, and that is a directory change: syncing
+    // the file's bytes does not make the entry durable, so a power cut after
+    // a successful install could still lose the config. Best effort — the
+    // bytes are already in place, so a directory that cannot be opened or
+    // synced (Windows cannot open a directory at all) must not turn a
+    // completed write into a failed command.
+    syncDirectory(path.dirname(destination));
   } catch (error) {
     if (fd !== undefined) {
       try {
@@ -324,6 +333,32 @@ function writeConfigAtomically(
     // temp path this call did not create (EEXIST) is never removed.
     if (created) rmSync(tempPath, { force: true });
     throw error;
+  }
+}
+
+/**
+ * Ask the operating system to flush a directory's entries, so a name that a
+ * rename just published survives a power cut. Best effort by design: this is
+ * a durability improvement, not a precondition, and the caller has already
+ * written every byte it promised.
+ */
+function syncDirectory(directory: string): void {
+  if (process.platform === 'win32') return;
+  let dirFd: number | undefined;
+  try {
+    dirFd = openSync(directory, 'r');
+    fsyncSync(dirFd);
+  } catch {
+    // An unopenable or unsyncable directory (a network filesystem, a host
+    // that refuses directory sync) does not invalidate the write.
+  } finally {
+    if (dirFd !== undefined) {
+      try {
+        closeSync(dirFd);
+      } catch {
+        // Nothing left to report: the config is in place.
+      }
+    }
   }
 }
 

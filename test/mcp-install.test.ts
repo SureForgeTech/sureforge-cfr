@@ -109,6 +109,112 @@ describe('mcp-install', () => {
     }
   });
 
+  // The directory entry is what a rename publishes, so the rename itself is
+  // only durable once the directory has been synced. Both directory tests
+  // substitute `node:fs` because the ordering and the failure are not
+  // otherwise observable from a passing command.
+  it.skipIf(process.platform === 'win32')(
+    'flushes the directory entry after the rename',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dirsync-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        writeFileSync(target, '{"mcpServers":{}}\n', 'utf8');
+        const events: string[] = [];
+
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          const opened = new Map<number, string>();
+          return {
+            ...actual,
+            openSync: (
+              file: Parameters<typeof actual.openSync>[0],
+              flags: Parameters<typeof actual.openSync>[1],
+              mode?: Parameters<typeof actual.openSync>[2],
+            ): number => {
+              const fd = actual.openSync(file, flags, mode);
+              const label = flags === 'r' && file === tempDir ? 'directory' : 'temp';
+              opened.set(fd, label);
+              events.push(`open:${label}`);
+              return fd;
+            },
+            writeFileSync: (
+              file: Parameters<typeof actual.writeFileSync>[0],
+              data: Parameters<typeof actual.writeFileSync>[1],
+              options?: Parameters<typeof actual.writeFileSync>[2],
+            ): void => {
+              if (typeof file === 'number') events.push('write');
+              actual.writeFileSync(file, data, options);
+            },
+            fsyncSync: (fd: number): void => {
+              events.push(`fsync:${opened.get(fd) ?? 'unknown'}`);
+              actual.fsyncSync(fd);
+            },
+            renameSync: (
+              from: Parameters<typeof actual.renameSync>[0],
+              to: Parameters<typeof actual.renameSync>[1],
+            ): void => {
+              events.push('rename');
+              actual.renameSync(from, to);
+            },
+          };
+        });
+        const mocked = await import('../src/commands/mcp-install.js');
+
+        expect(mocked.installClientConfig('cursor', target).status).toBe('updated');
+
+        // Bytes before the name, name before its directory entry.
+        expect(events.indexOf('write')).toBeLessThan(events.indexOf('fsync:temp'));
+        expect(events[events.indexOf('rename') - 1]).toBe('fsync:temp');
+        expect(events.slice(events.indexOf('rename') + 1)).toContain('fsync:directory');
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'still installs when the filesystem refuses a directory sync',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-dirsync-fail-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        writeFileSync(target, '{"mcpServers":{}}\n', 'utf8');
+
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          return {
+            ...actual,
+            // A directory handler that cannot sync is a durability
+            // limitation, not a reason to fail a write that succeeded.
+            fsyncSync: (fd: number): void => {
+              const isDirectory = actual.fstatSync(fd).isDirectory();
+              if (isDirectory) {
+                const error = new Error('EINVAL: invalid argument, fsync') as NodeJS.ErrnoException;
+                error.code = 'EINVAL';
+                throw error;
+              }
+              actual.fsyncSync(fd);
+            },
+          };
+        });
+        const mocked = await import('../src/commands/mcp-install.js');
+
+        expect(mocked.installClientConfig('cursor', target).status).toBe('updated');
+        expect(readFileSync(target, 'utf8')).toContain('"mcpServers"');
+        expect(readdirSync(tempDir)).toEqual(['mcp.json']);
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.skipIf(process.platform === 'win32')(
     'removes the temp file when the write fails part-way through',
     async () => {
@@ -391,10 +497,15 @@ describe('mcp-install', () => {
         writeFileSync(victim, 'untouched\n', 'utf8');
         // The temp name is predictable; a hostile or accidental file sitting
         // there must fail the install, not receive the config.
-        symlinkSync(victim, `${target}.${process.pid}.cfr-free.tmp`);
+        const squatter = `${target}.${process.pid}.cfr-free.tmp`;
+        symlinkSync(victim, squatter);
         expect(() => installClientConfig('cursor', target)).toThrow();
         expect(readFileSync(victim, 'utf8')).toBe('untouched\n');
         expect(existsSync(target)).toBe(false);
+        // The cleanup removes only a temp this call CREATED. An occupant that
+        // was already there — this link — has to survive the refusal too, or
+        // the error path would delete a file it never made.
+        expect(lstatSync(squatter).isSymbolicLink()).toBe(true);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }

@@ -29,7 +29,10 @@ user's and may hold comments or another server's settings (an unparseable or
 non-object file is refused with exit 5, the same code `export` uses for a
 destructive write it declines). It replaces the file in one step — a
 sibling temporary file renamed into place — so an interrupted or failed write
-leaves the user's config as it was instead of half-written, and it writes
+leaves the user's config as it was instead of half-written: the new content
+is flushed to the disk before the rename and the directory entry after it, so
+a power cut cannot leave a config that is neither the old one nor the
+complete new one. It writes
 through a symlinked config (including one whose target does not exist yet)
 rather than replacing the link, so a dotfiles setup keeps it. A config that
 is read-only is left alone and the write fails, as it did before. Replacing
