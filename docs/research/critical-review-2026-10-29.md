@@ -17,9 +17,10 @@ finding below is tracked to an issue or a fixing pull request yet. The
 findings are the record of what the audit saw on 2026-10-29; they are not a
 statement about the tree today. Each one was re-checked against `main` on
 2026-11-22, and the **Dispositions** table below says where it stands and
-what the evidence is. One is still open — **CR-13**, a release-workflow change
-that needs the operator's sign-off — so the open-work list in `ROADMAP.md`
-does not yet name it.
+what the evidence is. One finding is still open — **CR-13**, a
+release-workflow change that needs the operator's sign-off — and one is only
+partly addressed (**CR-30**); the open-work list in `ROADMAP.md` names
+neither.
 
 ## How to read this
 
@@ -128,8 +129,8 @@ documentation — and one is the operator's to close.
 
 | ID    | P   | Disposition and the evidence                                                                                                                                                                              |
 | ----- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CR-01 | P1  | **CLOSED** — the guard moved to `test/release-guard.test.ts`; CI and the release check out with `fetch-depth: 0`.                                                                                         |
-| CR-02 | P1  | **CLOSED** — `ajv`, `ajv-formats` and `yaml` are declared dependencies; the spec is parsed in-process.                                                                                                    |
+| CR-01 | P1  | **CLOSED** — the guard is still in `test/install-paths.test.ts`, and it now fails loudly when the checkout has no tags; CI and the release check out with `fetch-depth: 0`.                               |
+| CR-02 | P1  | **CLOSED** — `ajv`, `ajv-formats` and `yaml` are declared devDependencies; the spec is parsed in-process.                                                                                                 |
 | CR-03 | P1  | **CLOSED** — the browser script is `src/titan/ui-client.js`, a real file the gate lints.                                                                                                                  |
 | CR-04 | P1  | **CLOSED** — the expensive routes cost ten tokens in `precheck`.                                                                                                                                          |
 | CR-05 | P1  | **CLOSED** — `parseSearchArgs` refuses a short query before any store is opened.                                                                                                                          |
@@ -154,13 +155,13 @@ documentation — and one is the operator's to close.
 | CR-24 | P2  | **CLOSED** — the form has a `part` input; the chapter input is patterned.                                                                                                                                 |
 | CR-25 | P2  | **CLOSED** — `/openapi.yaml` is served and the API index lists the routes.                                                                                                                                |
 | CR-26 | P3  | **CLOSED** — the README names the line-level redline view.                                                                                                                                                |
-| CR-27 | P2  | **OPEN BY DESIGN** — the SDK requires the `content` array; SPEC §6 quantifies the duplicate as about twice the budget. A cost to state, not a defect to fix.                                              |
+| CR-27 | P2  | **OPEN BY DESIGN** — the SDK requires the `content` array; SPEC §6 item 7 quantifies the duplicate for `compare_snapshots`. A cost to state, not a defect to fix.                                         |
 | CR-28 | P2  | **CLOSED** — the tools carry the injection posture and a 100 000-character body cap.                                                                                                                      |
-| CR-29 | P2  | **CLOSED** — `ensureIndex` re-throws an actionable error with advice and a next step.                                                                                                                     |
+| CR-29 | P2  | **CLOSED** — `syncWithGuidance` re-throws an actionable error with advice and a next step.                                                                                                                |
 | CR-30 | P2  | **PARTLY ADDRESSED** — the workflow guard test fell from 1 627 to 1 091 lines; the checks the finding kept remain.                                                                                        |
 | CR-31 | P2  | **CLOSED** — SPEC §10, §12 and §13 are "moved to the delivery log".                                                                                                                                       |
 | CR-32 | P2  | **CLOSED** — the query-language block moved to `src/core/query.ts`.                                                                                                                                       |
-| CR-33 | P2  | **CLOSED** — every response carries `Referrer-Policy: no-referrer`; HSTS stays conditional on TLS.                                                                                                        |
+| CR-33 | P2  | **CLOSED** — every response carries `Referrer-Policy: no-referrer`; the application sends no HSTS, and SPEC §5 records that a TLS-terminating proxy must send it.                                         |
 | CR-34 | P3  | **CLOSED** — actionlint is installed by commit.                                                                                                                                                           |
 | CR-35 | P3  | **CLOSED** — `trivy` and `semgrep` run as CI jobs.                                                                                                                                                        |
 | CR-36 | P3  | **CLOSED** — the security lint covers `**/*.mjs`; `prepare.mjs` prefers `npm ci`.                                                                                                                         |
