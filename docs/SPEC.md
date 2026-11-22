@@ -301,17 +301,22 @@ shared memory in the existing `-shm` file and can create missing `-wal` and
 `-shm` sidecars if the directory is writable. The main database file and
 its permissions stay intact. A positional snapshot uses the immutable
 evidence path, which refuses journal sidecars, and verifies against its
-own recorded receipt. The file is checked BEFORE it is opened: SQLite's open
-is synchronous and blocks on a FIFO, so a directory, a device or a FIFO is
-refused as a usage mistake instead of hanging the command. The check also
-tells a path that is not there from one that cannot be read — a path whose
+own recorded receipt. The file is checked BEFORE it is opened. SQLite's open
+is synchronous and blocks on a FIFO — one mistyped path would hang the
+command — and it cannot open a directory or a device either, so a path that
+is not a regular file is refused as a usage mistake. The check also tells a
+path that is not there from one that cannot be INSPECTED — a path whose
 parent component is a regular file cannot name an index at all, while a path
-nobody may read is refused as unreadable — and each case carries its own
-guidance. (The check and the open are two steps, so a file replaced by a FIFO
-between them would still be opened — and could block the command again; that
-needs write access to the file's own directory, and the residual risk is
-stated here rather than hidden.) Exit semantics, reusing the existing exit
-codes (no new code): `0` for a readable index, INCLUDING an absent receipt;
+in an unreadable directory is refused as unreadable — and each case carries
+its own guidance. A file whose own permissions deny reading it is still a
+regular file: the open refuses it, and the reader is told the file is
+unreadable, has journal sidecars, or is not a cfr-free index — the open can
+fail for any of those. (The check and the open are two steps, so a file
+replaced by a FIFO between them would still be opened — and could block the
+command again; that needs write access to the file's own directory, and the
+residual risk is stated here rather than hidden.) Exit semantics, reusing the
+existing exit codes (no new code): `0` for a readable index, INCLUDING an
+absent receipt;
 `1` when the recorded receipt does not match the current rows; `2` (the
 existing usage/invalid-input mapping) for a missing, unreadable or non-index
 input.

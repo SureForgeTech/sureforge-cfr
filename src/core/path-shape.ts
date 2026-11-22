@@ -35,7 +35,13 @@ export function inspectPathShape(resolved: string): PathShape {
   try {
     return statSync(resolved).isFile() ? { kind: 'regular-file' } : { kind: 'not-a-regular-file' };
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
+    // The errno tells WHY a path could not be inspected. A thrown value that
+    // is not an error object has no errno: it is then "might be there and
+    // could not be inspected", never "not there".
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? (error as { code?: unknown }).code
+        : undefined;
     if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'missing' };
     return {
       kind: 'unreadable',

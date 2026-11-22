@@ -300,7 +300,15 @@ describe('runVerifyCommand', () => {
         runVerifyCommand(configured, createTestLogger()),
       );
       expect(configuredError.message).toMatch(/not a regular file/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
+  it('refuses a FIFO before SQLite opens it', (ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
       // A FIFO is the case that matters: SQLite's SYNCHRONOUS open blocks on
       // one, so the command would wait forever for a writer that never comes.
       // The refusal has to happen BEFORE the open. The writer below keeps the
@@ -308,19 +316,21 @@ describe('runVerifyCommand', () => {
       // this test instead of hanging it.
       const fifo = path.join(dir, 'fifo.sqlite');
       const made = spawnSync('mkfifo', [fifo]);
-      if (made.status === 0) {
-        const writer = spawn('sh', ['-c', `head -c 100 /dev/zero > "${fifo}"`], {
-          stdio: 'ignore',
-        });
-        try {
-          const fifoError = captureServiceError(() =>
-            runVerifyCommand(config, createTestLogger(), fifo),
-          );
-          expect(fifoError.code).toBe('invalid_input');
-          expect(fifoError.message).toMatch(/not a regular file/);
-        } finally {
-          writer.kill();
-        }
+      if (made.status !== 0) {
+        // No `mkfifo` on this machine: say so instead of quietly not running
+        // the case that matters.
+        ctx.skip();
+        return;
+      }
+      const writer = spawn('sh', ['-c', `head -c 100 /dev/zero > "${fifo}"`], { stdio: 'ignore' });
+      try {
+        const fifoError = captureServiceError(() =>
+          runVerifyCommand(config, createTestLogger(), fifo),
+        );
+        expect(fifoError.code).toBe('invalid_input');
+        expect(fifoError.message).toMatch(/not a regular file/);
+      } finally {
+        writer.kill();
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -369,6 +379,34 @@ describe('runVerifyCommand', () => {
           });
         } finally {
           chmodSync(locked, 0o700);
+        }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('names every cause an open can fail for', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      // A file whose own permissions deny reading it IS a regular file, so
+      // the OPEN is what refuses it. The reader must be given every cause an
+      // open can have — not one cause asserted as fact.
+      if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+        const locked = path.join(dir, 'locked.sqlite');
+        writeFileSync(locked, 'not a database');
+        chmodSync(locked, 0o000);
+        try {
+          const error = captureServiceError(() =>
+            runVerifyCommand(config, createTestLogger(), locked),
+          );
+          expect(error.code).toBe('invalid_input');
+          expect(error.message).toMatch(
+            /unreadable, has journal sidecars, or is not a cfr-free index/,
+          );
+        } finally {
+          chmodSync(locked, 0o600);
         }
       }
     } finally {
