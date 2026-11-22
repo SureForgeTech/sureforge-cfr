@@ -13,8 +13,14 @@ locally without PyYAML),
 
 This file is a **finding log**, not a dispatch handoff. It does not follow the
 "Dispatch and closure contract" of `docs/research/review-2026-10-21.md`; no
-finding below is tracked to an issue or a fixing pull request yet. Nothing in
-it has been changed in the tree — every item is an open observation.
+finding below is tracked to an issue or a fixing pull request yet. The
+findings are the record of what the audit saw on 2026-10-29; they are not a
+statement about the tree today. Each one was re-checked against `main` on
+2026-11-22, and the **Dispositions** table below says where it stands and
+what the evidence is. One finding is still open — **CR-13**, a
+release-workflow change that needs the operator's sign-off — and one is only
+partly addressed (**CR-30**); the open-work list in `ROADMAP.md` names
+neither.
 
 ## How to read this
 
@@ -111,6 +117,60 @@ modified** and `git status` was clean before and after.
 | [CR-40](#cr-40) | P3  | UI / a11y       | Missing `aria-current`; heading order skips `h2`                    | CONFIRMED  |
 | [CR-41](#cr-41) | P3  | Core            | Stale JSDoc block and two unused exports                            | CONFIRMED  |
 | [CR-42](#cr-42) | P3  | CI / docs       | `AGENTS.md` names three required checks; protection requires four   | CONFIRMED  |
+
+---
+
+## Dispositions (each finding re-checked against `main` on 2026-11-22)
+
+The findings below are the audit's own record; this table is where each one
+stands now, and what in the tree says so. **Thirty-eight are closed**; three
+stand as observations — one by design, one partly addressed, one resolved as
+documentation — and one is the operator's to close.
+
+| ID    | P   | Disposition and the evidence                                                                                                                                                                              |
+| ----- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CR-01 | P1  | **CLOSED** — the guard is still in `test/install-paths.test.ts`, and it now fails loudly when the checkout has no tags; CI and the release check out with `fetch-depth: 0`.                               |
+| CR-02 | P1  | **CLOSED** — `ajv`, `ajv-formats` and `yaml` are declared devDependencies; the spec is parsed in-process.                                                                                                 |
+| CR-03 | P1  | **CLOSED** — the browser script is `src/titan/ui-client.js`, a real file the gate lints.                                                                                                                  |
+| CR-04 | P1  | **CLOSED** — the expensive routes cost ten tokens in `precheck`.                                                                                                                                          |
+| CR-05 | P1  | **CLOSED** — `parseSearchArgs` refuses a short query before any store is opened.                                                                                                                          |
+| CR-06 | P1  | **CLOSED** — the search has `--json`, `--page` and `--per-page`.                                                                                                                                          |
+| CR-07 | P1  | **CLOSED** — `invalid_input` maps to `EXIT.USAGE`.                                                                                                                                                        |
+| CR-08 | P1  | **CLOSED** — the UI maps `invalid_input` to plain guidance.                                                                                                                                               |
+| CR-09 | P1  | **CLOSED** — the route change moves focus.                                                                                                                                                                |
+| CR-10 | P2  | **CLOSED** — the error classes live in `src/core/errors.ts`; `test/import-cycles.test.ts` guards them.                                                                                                    |
+| CR-11 | P1  | **CLOSED** — the contract suite cites symbols, not source lines.                                                                                                                                          |
+| CR-12 | P2  | **CLOSED** — the documented default binds loopback.                                                                                                                                                       |
+| CR-13 | P2  | **OPEN** — the release gate runs `npm run ci` (`npm audit`), not the secret scan CI's `security` job runs. Fixing it is a workflow change: the operator's sign-off, and a push from outside this sandbox. |
+| CR-14 | P2  | **CLOSED** — the server sets the request, header and connection timeouts.                                                                                                                                 |
+| CR-15 | P2  | **CLOSED** — one query builder: `src/core/query.ts`.                                                                                                                                                      |
+| CR-16 | P2  | **CLOSED** — one permalink module: `src/core/urls.ts`.                                                                                                                                                    |
+| CR-17 | P2  | **CLOSED** — one citation helper: `src/core/citations.ts`.                                                                                                                                                |
+| CR-18 | P2  | **CLOSED** — one error contract: `runTool` in `src/mcp/tool-result.ts`.                                                                                                                                   |
+| CR-19 | P2  | **CLOSED** — SPEC §7.1 and the lint config both say fifteen.                                                                                                                                              |
+| CR-20 | P2  | **CLOSED** — the persisted record is parsed with `syncChangesSchema.safeParse`.                                                                                                                           |
+| CR-21 | P2  | **CLOSED** — `UpstreamFormatError` maps to 502.                                                                                                                                                           |
+| CR-22 | P2  | **CLOSED** — the `historical.ts` cast is gone.                                                                                                                                                            |
+| CR-23 | P2  | **CLOSED** — the UI renders the provision's `markdown`.                                                                                                                                                   |
+| CR-24 | P2  | **CLOSED** — the form has a `part` input; the chapter input is patterned.                                                                                                                                 |
+| CR-25 | P2  | **CLOSED** — `/openapi.yaml` is served and the API index lists the routes.                                                                                                                                |
+| CR-26 | P3  | **CLOSED** — the README names the line-level redline view.                                                                                                                                                |
+| CR-27 | P2  | **OPEN BY DESIGN** — the SDK requires the `content` array; SPEC §6 item 7 quantifies the duplicate for `compare_snapshots`. A cost to state, not a defect to fix.                                         |
+| CR-28 | P2  | **CLOSED** — the tools carry the injection posture and a 100 000-character body cap.                                                                                                                      |
+| CR-29 | P2  | **CLOSED** — `syncWithGuidance` re-throws an actionable error with advice and a next step.                                                                                                                |
+| CR-30 | P2  | **PARTLY ADDRESSED** — the workflow guard test fell from 1 627 to 1 091 lines; the checks the finding kept remain.                                                                                        |
+| CR-31 | P2  | **CLOSED** — SPEC §10, §12 and §13 are "moved to the delivery log".                                                                                                                                       |
+| CR-32 | P2  | **CLOSED** — the query-language block moved to `src/core/query.ts`.                                                                                                                                       |
+| CR-33 | P2  | **CLOSED** — every response carries `Referrer-Policy: no-referrer`; the application sends no HSTS, and SPEC §5 records that a TLS-terminating proxy must send it.                                         |
+| CR-34 | P3  | **CLOSED** — actionlint is installed by commit.                                                                                                                                                           |
+| CR-35 | P3  | **CLOSED** — `trivy` and `semgrep` run as CI jobs.                                                                                                                                                        |
+| CR-36 | P3  | **CLOSED** — the security lint covers `**/*.mjs`; `prepare.mjs` prefers `npm ci`.                                                                                                                         |
+| CR-37 | P3  | **CLOSED** — the prompt arguments are fenced with a per-render nonce.                                                                                                                                     |
+| CR-38 | P3  | **ADDRESSED AS DOCUMENTATION** — SPEC §4 states the receipt is never a trust anchor.                                                                                                                      |
+| CR-39 | P3  | **CLOSED** — `--help` after a command prints that command's usage.                                                                                                                                        |
+| CR-40 | P3  | **CLOSED** — the active nav link carries `aria-current="page"`.                                                                                                                                           |
+| CR-41 | P3  | **CLOSED** — the stacked JSDoc is gone; `isClientSafe` is private.                                                                                                                                        |
+| CR-42 | P3  | **CLOSED** — `AGENTS.md` names the four required checks, and a test guards them.                                                                                                                          |
 
 ---
 
