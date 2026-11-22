@@ -53,9 +53,14 @@ describe('the shared part-number rule', () => {
     expect(PART_NUMBER_PATTERN.test('1234')).toBe(false);
 
     const srcDir = fileURLToPath(new URL('../src/', import.meta.url));
-    // The env-var rules in config.ts share the SHAPE but not the rule: they
-    // bound a number of days or hours, not a CFR part.
-    const allowed = new Set(['part-number.ts', 'config.ts']);
+    // Two files may hold the shape: the rule's own home, and src/config.ts,
+    // whose env-var rules share the SHAPE but not the rule (they bound a
+    // number of days or hours, not a CFR part). Both are exempt by PATH, so
+    // a file merely NAMED config.ts elsewhere is not.
+    const allowed = new Set([
+      path.join(srcDir, 'core', 'part-number.ts'),
+      path.join(srcDir, 'config.ts'),
+    ]);
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -64,7 +69,7 @@ describe('the shared part-number rule', () => {
           walk(full);
           continue;
         }
-        if (!entry.name.endsWith('.ts') || allowed.has(entry.name)) continue;
+        if (!entry.name.endsWith('.ts') || allowed.has(full)) continue;
         if (readFileSync(full, 'utf8').includes('d{1,3}$')) offenders.push(full);
       }
     };

@@ -216,6 +216,18 @@ describe('Titan HTTP API', () => {
     expect(body['part']).toBeUndefined();
   });
 
+  it('reads a part filter spelled with leading zeros as the same part', async () => {
+    // The OpenAPI contract for this parameter: "04" names part 4. Pinned
+    // here, at the route the contract describes.
+    const canonical = await get('/api/v1/search?q=rating+schedule&part=4');
+    const padded = await get('/api/v1/search?q=rating+schedule&part=04');
+    expect(padded.status).toBe(200);
+    expect(padded.body['total']).toBe(canonical.body['total']);
+    expect((padded.body['hits'] as Array<{ citation: string }>).map((hit) => hit.citation)).toEqual(
+      (canonical.body['hits'] as Array<{ citation: string }>).map((hit) => hit.citation),
+    );
+  });
+
   it('supports kind and chapter search filters', async () => {
     const { status, body } = await get('/api/v1/search?q=rating+schedule&kind=appendix&chapter=I');
     expect(status).toBe(200);
