@@ -337,7 +337,7 @@ describe('runVerifyCommand', () => {
     }
   });
 
-  it('tells a path that cannot be there from one that cannot be read', () => {
+  it('tells a path that cannot be there from one that cannot be inspected', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
     try {
       const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
@@ -350,64 +350,74 @@ describe('runVerifyCommand', () => {
       );
       expect(missingError.code).toBe('invalid_input');
       expect(missingError.message).toMatch(/no index or snapshot here/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
-      // A path nobody may read might be there and could not be inspected:
-      // the detail goes to the log, the reader gets guidance. (Root reads
-      // everything and Windows has no POSIX permissions, so it is skipped
-      // there.)
-      if (process.platform !== 'win32' && process.getuid?.() !== 0) {
-        const locked = path.join(dir, 'locked');
-        mkdirSync(locked);
-        const hidden = path.join(locked, 'hidden.sqlite');
-        writeFileSync(hidden, 'not a database');
-        chmodSync(locked, 0o000);
-        const logger = createTestLogger();
-        try {
-          const unreadableError = captureServiceError(() =>
-            runVerifyCommand(config, logger, hidden),
-          );
-          expect(unreadableError.code).toBe('invalid_input');
-          expect(unreadableError.message).toMatch(/cannot be read/);
-          // The reader's line carries no path and no raw errno.
-          expect(unreadableError.message).not.toContain(dir);
-          expect(unreadableError.message).not.toMatch(/EACCES|permission denied/i);
-          // The detail is in the log.
-          expect(logger.records).toContainEqual({
-            level: 'warn',
-            message: 'verification could not inspect the file',
-            fields: { path: hidden, detail: expect.any(String) },
-          });
-        } finally {
-          chmodSync(locked, 0o700);
-        }
+  it('refuses a path that cannot be inspected', (ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      // A path nobody may inspect might be there and could not be read: the
+      // detail goes to the log, the reader gets guidance. (Root reads
+      // everything and Windows has no POSIX permissions, so the case is
+      // skipped there — and says so.)
+      if (process.platform === 'win32' || process.getuid?.() === 0) {
+        ctx.skip();
+        return;
+      }
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      const locked = path.join(dir, 'locked');
+      mkdirSync(locked);
+      const hidden = path.join(locked, 'hidden.sqlite');
+      writeFileSync(hidden, 'not a database');
+      chmodSync(locked, 0o000);
+      const logger = createTestLogger();
+      try {
+        const unreadableError = captureServiceError(() => runVerifyCommand(config, logger, hidden));
+        expect(unreadableError.code).toBe('invalid_input');
+        expect(unreadableError.message).toMatch(/cannot be read/);
+        // The reader's line carries no path and no raw errno.
+        expect(unreadableError.message).not.toContain(dir);
+        expect(unreadableError.message).not.toMatch(/EACCES|permission denied/i);
+        // The detail is in the log.
+        expect(logger.records).toContainEqual({
+          level: 'warn',
+          message: 'verification could not inspect the file',
+          fields: { path: hidden, detail: expect.any(String) },
+        });
+      } finally {
+        chmodSync(locked, 0o700);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('names every cause an open can fail for', () => {
+  it('lists the causes an open can fail for, not a single false one', (ctx) => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
     try {
-      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
       // A file whose own permissions deny reading it IS a regular file, so
       // the OPEN is what refuses it. The reader must be given every cause an
       // open can have — not one cause asserted as fact.
-      if (process.platform !== 'win32' && process.getuid?.() !== 0) {
-        const locked = path.join(dir, 'locked.sqlite');
-        writeFileSync(locked, 'not a database');
-        chmodSync(locked, 0o000);
-        try {
-          const error = captureServiceError(() =>
-            runVerifyCommand(config, createTestLogger(), locked),
-          );
-          expect(error.code).toBe('invalid_input');
-          expect(error.message).toMatch(
-            /unreadable, has journal sidecars, or is not a cfr-free index/,
-          );
-        } finally {
-          chmodSync(locked, 0o600);
-        }
+      if (process.platform === 'win32' || process.getuid?.() === 0) {
+        ctx.skip();
+        return;
+      }
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      const locked = path.join(dir, 'locked.sqlite');
+      writeFileSync(locked, 'not a database');
+      chmodSync(locked, 0o000);
+      try {
+        const error = captureServiceError(() =>
+          runVerifyCommand(config, createTestLogger(), locked),
+        );
+        expect(error.code).toBe('invalid_input');
+        expect(error.message).toMatch(
+          /missing, unreadable, locked, has journal sidecars, or is not a cfr-free index/,
+        );
+      } finally {
+        chmodSync(locked, 0o600);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });

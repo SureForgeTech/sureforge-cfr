@@ -29,8 +29,8 @@ import type { Logger } from '../logger.js';
  *
  * The file is checked BEFORE it is opened: SQLite's open is synchronous and
  * blocks on a FIFO, and it cannot open a directory or a device either, so a
- * path that is not a regular file is refused as a usage mistake instead of
- * hanging the command.
+ * path that is not a regular file is refused as a usage mistake — a FIFO
+ * would have hung the command.
  */
 
 /** The receipt verdict: the recorded hash is gone, agrees, or disagrees. */
@@ -112,11 +112,12 @@ export function runVerifyCommand(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     logger.warn('verification refused the file', { path: resolved, detail });
-    // The cause is a set, not one fact: a file whose own permissions deny
-    // reading it, a valid index that still has journal sidecars, and a file
-    // that is not an index at all all fail the open.
+    // The cause is a set, not one fact: a file that vanished, a file whose
+    // own permissions deny reading it, a file another process holds locked,
+    // a valid index that still has journal sidecars, and a file that is not
+    // an index at all each fail the open.
     throw refuse(
-      'cannot open as a cfr-free index — the file is unreadable, has journal sidecars, or is not a cfr-free index',
+      'cannot open as a cfr-free index — the file is missing, unreadable, locked, has journal sidecars, or is not a cfr-free index',
     );
   }
   try {

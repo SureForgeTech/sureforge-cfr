@@ -309,9 +309,9 @@ path that is not there from one that cannot be INSPECTED — a path whose
 parent component is a regular file cannot name an index at all, while a path
 in an unreadable directory is refused as unreadable — and each case carries
 its own guidance. A file whose own permissions deny reading it is still a
-regular file: the open refuses it, and the reader is told the file is
-unreadable, has journal sidecars, or is not a cfr-free index — the open can
-fail for any of those. (The check and the open are two steps, so a file
+regular file: the open refuses it, and the reader is told the file is missing,
+unreadable, locked, has journal sidecars, or is not a cfr-free index — the
+open can fail for any of those. (The check and the open are two steps, so a file
 replaced by a FIFO between them would still be opened — and could block the
 command again; that needs write access to the file's own directory, and the
 residual risk is stated here rather than hidden.) Exit semantics, reusing the
