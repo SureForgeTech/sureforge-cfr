@@ -271,6 +271,20 @@ describe('CFRService.search', () => {
       expect(service.search({ query: 'rating schedule', chapter: 'I' }).total).toBe(3);
     });
   });
+
+  it('reads a part filter spelled with leading zeros as the same part', () => {
+    withService((service) => {
+      // "04" is part 4. Unnormalized it would match no row, and the search
+      // would answer "no hits" for a part that holds hits.
+      const canonical = service.search({ query: 'rating schedule', part: '4' });
+      const padded = service.search({ query: 'rating schedule', part: '04' });
+      expect(canonical.total).toBeGreaterThan(0);
+      expect(padded.total).toBe(canonical.total);
+      expect(padded.hits.map((hit) => hit.citation)).toEqual(
+        canonical.hits.map((hit) => hit.citation),
+      );
+    });
+  });
 });
 
 describe('CFRService.getSection', () => {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { findProvision, normalizeCitation } from '../src/core/citations.js';
+import { normalizePartNumber, PART_NUMBER_PATTERN } from '../src/core/part-number.js';
 import { buildFtsQueries, queryTerms, toFtsQuery } from '../src/core/query.js';
 import { datedSourceUrlFor, sourceUrlFor } from '../src/core/urls.js';
 import type { RawSection } from '../src/core/xml.js';
@@ -19,6 +23,60 @@ import type { EcfrApi } from '../src/core/ecfr.js';
  * lives and the types the failures carry, so a second copy cannot appear
  * without a failing test.
  */
+
+describe('the shared part-number rule', () => {
+  it('reads a padded spelling as the part it names', () => {
+    // The index holds the canonical identifier ("4"), so a filter spelled
+    // "04" has to be read as "4" — otherwise it matches no row, and a
+    // comparison answers "nothing changed" for a part that did change.
+    expect(normalizePartNumber('04')).toBe('4');
+    expect(normalizePartNumber('4')).toBe('4');
+    expect(normalizePartNumber('017')).toBe('17');
+    expect(normalizePartNumber('100')).toBe('100');
+  });
+
+  it('leaves a value that is not a part number alone', () => {
+    // The fallback arm: the caller's own rule decides what to do with it.
+    expect(normalizePartNumber('four')).toBe('four');
+    expect(normalizePartNumber('1234')).toBe('1234');
+    expect(normalizePartNumber('')).toBe('');
+  });
+
+  it('keeps the shape of a part filter in one module', () => {
+    // The schemas and the CLI take the pattern from here, so a second copy
+    // cannot appear without a failing test. The scan reads the PATTERN's
+    // source text, so a copy written as a literal or built with
+    // `new RegExp` is caught alike.
+    expect(PART_NUMBER_PATTERN.test('4')).toBe(true);
+    expect(PART_NUMBER_PATTERN.test('04')).toBe(true);
+    expect(PART_NUMBER_PATTERN.test('four')).toBe(false);
+    expect(PART_NUMBER_PATTERN.test('1234')).toBe(false);
+
+    const srcDir = fileURLToPath(new URL('../src/', import.meta.url));
+    // Two files may hold the shape: the rule's own home, and src/config.ts,
+    // whose env-var rules share the SHAPE but not the rule (they bound a
+    // number of days or hours, not a CFR part). Both are exempt by PATH, so
+    // a file merely NAMED config.ts elsewhere is not.
+    const allowed = new Set([
+      path.join(srcDir, 'core', 'part-number.ts'),
+      path.join(srcDir, 'config.ts'),
+    ]);
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.ts') || allowed.has(full)) continue;
+        if (readFileSync(full, 'utf8').includes('d{1,3}$')) offenders.push(full);
+      }
+    };
+    walk(srcDir);
+    expect(offenders).toEqual([]);
+  });
+});
 
 describe('the shared FTS query builder (CR-15)', () => {
   it('builds both tiers from one parse', () => {

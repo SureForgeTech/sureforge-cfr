@@ -630,6 +630,16 @@ describe('MCP server (in-memory transport)', () => {
       'all of Title 38',
     );
 
+    // A part spelled with leading zeros names the same part: the scope the
+    // prompt states is the one the index holds.
+    const padded = await client.getPrompt({
+      name: 'cfr_research',
+      arguments: { topic: 'prosthetics', part: '04' },
+    });
+    const paddedText = (padded.messages[0]?.content as { text?: string }).text ?? '';
+    expect(paddedText).toContain('CFR part 4');
+    expect(paddedText).not.toContain('CFR part 04');
+
     await expect(client.getPrompt({ name: 'cfr_research', arguments: {} })).rejects.toThrow();
     await expect(
       client.getPrompt({ name: 'cfr_research', arguments: { topic: 'x' } }),
@@ -662,6 +672,15 @@ describe('MCP server (in-memory transport)', () => {
     const unanchoredText = (unanchored.messages[0]?.content as { text?: string }).text ?? '';
     expect(unanchoredText).toContain('all of Title 38');
     expect(unanchoredText).not.toContain('read it in full first');
+
+    // A part spelled with leading zeros names the same part.
+    const padded = await client.getPrompt({
+      name: 'cfr_claim_evaluation',
+      arguments: { issue: 'TDIU criteria', part: '04' },
+    });
+    const paddedText = (padded.messages[0]?.content as { text?: string }).text ?? '';
+    expect(paddedText).toContain('CFR part 4');
+    expect(paddedText).not.toContain('CFR part 04');
 
     await expect(
       client.getPrompt({

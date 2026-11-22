@@ -4,6 +4,7 @@ import { CHANGE_LIST_CAP, diffHashes } from './changes.js';
 import { assertIssueDate } from './diff.js';
 import { ServiceError } from './errors.js';
 import { inspectPathShape } from './path-shape.js';
+import { normalizePartNumber } from './part-number.js';
 import { lcsHunks, presenceHunks, splitRedlineLines, type Hunk } from './redline.js';
 import { DEFAULT_TITLE, Store, type SectionRow } from './store.js';
 import { datedSourceUrlFor } from './urls.js';
@@ -463,7 +464,10 @@ export function compareSnapshots(
   try {
     const toStore = openSnapshot(toResolved, 'to', deps.logger);
     try {
-      const part = options.part ?? null;
+      // The canonical spelling of the filter: "04" names part 4. Without it
+      // the filter matches no row, and the comparison answers "nothing
+      // changed" for a part that did change.
+      const part = options.part === undefined ? null : normalizePartNumber(options.part);
       const fromIssueDate = snapshotIssueDate(fromStore, 'from');
       const toIssueDate = snapshotIssueDate(toStore, 'to');
       if (fromIssueDate > toIssueDate) {
@@ -479,8 +483,8 @@ export function compareSnapshots(
       });
 
       const diff = diffHashes(
-        fromStore.snapshotTextHashes(DEFAULT_TITLE, options.part),
-        toStore.snapshotTextHashes(DEFAULT_TITLE, options.part),
+        fromStore.snapshotTextHashes(DEFAULT_TITLE, part ?? undefined),
+        toStore.snapshotTextHashes(DEFAULT_TITLE, part ?? undefined),
       );
 
       const fromSide = (citation: string): SideContext => ({

@@ -3,6 +3,7 @@ import { ServiceError } from './errors.js';
 import { normalizeCitation, normalizeTitledCitation } from './citations.js';
 import { datedSourceUrlFor, sourceUrlFor } from './urls.js';
 import { extractReferences } from './references.js';
+import { normalizePartNumber, PART_NUMBER_PATTERN } from './part-number.js';
 import { syncChangesSchema, type SyncChanges } from './changes.js';
 import { diffIssues, type IssueDiff } from './diff.js';
 import { redlineSection, type SectionRedline } from './redline.js';
@@ -60,7 +61,11 @@ const searchInputSchema = z.object({
   perPage: z.number().int().min(1).max(20).default(10),
   part: z
     .string()
-    .regex(/^\d{1,3}$/)
+    .regex(PART_NUMBER_PATTERN)
+    // The canonical spelling: "04" names part 4. Without it the filter
+    // matches no row, and the search answers "no hits" for a part that
+    // holds hits.
+    .transform(normalizePartNumber)
     .optional(),
   kind: z.enum(['section', 'appendix']).optional(),
   chapter: z
