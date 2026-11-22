@@ -594,6 +594,13 @@ describe('Titan HTTP request-size caps', () => {
     const paddedResponse = await fetch(`${base}/api/v1/browse?chapter=I&part=${paddedPart}`);
     expect(paddedResponse.status).toBe(404);
 
+    // `q` is measured the same way: 900 spaces before a legal query are 906
+    // raw bytes but a 6-byte query to the schema, and the URL stays under
+    // MAX_URL_BYTES because the form encodes a space as one `+`.
+    const paddedQ = new URLSearchParams({ q: `${' '.repeat(900)}mental` }).toString();
+    const paddedQResponse = await fetch(`${base}/api/v1/search?${paddedQ}`);
+    expect(paddedQResponse.status).toBe(200);
+
     // whole URL above 2048 bytes → 414 before validation
     const hugeResponse = await fetch(`${base}/api/v1/search?q=${'y'.repeat(3000)}`);
     expect(hugeResponse.status).toBe(414);
