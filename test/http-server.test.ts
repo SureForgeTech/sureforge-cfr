@@ -587,6 +587,13 @@ describe('Titan HTTP request-size caps', () => {
     const longPart = await fetch(`${base}/api/v1/browse?chapter=I&part=${'1'.repeat(20)}`);
     expect(longPart.status).toBe(404);
 
+    // The cap measures the value the schema sees, which is TRIMMED: 80 spaces
+    // before a part the schema accepts are 80 raw bytes the schema never
+    // reads, so the guard must not turn that documented request into a 400.
+    const paddedPart = encodeURIComponent(`${' '.repeat(80)}${'1'.repeat(20)}`);
+    const paddedResponse = await fetch(`${base}/api/v1/browse?chapter=I&part=${paddedPart}`);
+    expect(paddedResponse.status).toBe(404);
+
     // whole URL above 2048 bytes → 414 before validation
     const hugeResponse = await fetch(`${base}/api/v1/search?q=${'y'.repeat(3000)}`);
     expect(hugeResponse.status).toBe(414);

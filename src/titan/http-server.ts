@@ -310,14 +310,21 @@ function parseOptionalInt(raw: string | null): number | undefined {
   return Number(raw);
 }
 
-/** First oversized query parameter, or null when every cap holds. */
+/**
+ * First oversized query parameter, or null when every cap holds.
+ *
+ * Measured on the TRIMMED value, because the schemas trim before they bound:
+ * a part of eighty spaces followed by `4` is a legal `4` to the schema, and a
+ * guard that measured the raw bytes would answer `400` for a request the
+ * contract admits. The raw size is still bounded by {@link MAX_URL_BYTES}.
+ */
 function oversizedParam(url: URL): string | null {
-  const q = url.searchParams.get('q');
-  if (q !== null && Buffer.byteLength(q, 'utf8') > MAX_QUERY_BYTES) {
+  const q = url.searchParams.get('q')?.trim();
+  if (q !== undefined && q !== '' && Buffer.byteLength(q, 'utf8') > MAX_QUERY_BYTES) {
     return `q exceeds ${MAX_QUERY_BYTES} bytes`;
   }
-  const part = url.searchParams.get('part');
-  if (part !== null && Buffer.byteLength(part, 'utf8') > MAX_PART_BYTES) {
+  const part = url.searchParams.get('part')?.trim();
+  if (part !== undefined && part !== '' && Buffer.byteLength(part, 'utf8') > MAX_PART_BYTES) {
     return `part exceeds ${MAX_PART_BYTES} bytes`;
   }
   return null;
