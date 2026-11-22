@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { runExportCommand } from '../src/commands/export.js';
@@ -248,7 +249,7 @@ describe('export command', () => {
     }
   });
 
-  it('md export names the one title it holds, and keeps the header it always had', () => {
+  it('md export names the one title it holds', () => {
     const temp = openTempStore({
       sections: [makeSection({ title: 12, citation: '1026.1', text: 'Title 12 body.' })],
       issueDate: '2026-02-01',
@@ -261,6 +262,61 @@ describe('export command', () => {
       // header must not call it Title 38.
       expect(readFileSync(target, 'utf8').split('\n')[0]).toBe(
         '# Code of Federal Regulations — Title 12 (issue date: 2026-02-01)',
+      );
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('md export never dates one title with another title’s date', () => {
+    const temp = openTempStore({ seed: false });
+    const target = path.join(temp.dir, 'undated12.md');
+    try {
+      // An index whose Title 12 rows exist but records no date for Title 12,
+      // while the legacy key still holds Title 38's date. The legacy key is
+      // Title 38's, and only Title 38's: dating Title 12 with it would put
+      // the wrong revision on the document.
+      temp.store.replaceTitleWithBaseline(
+        12,
+        [makeSection({ title: 12, citation: '1026.1', text: 'Title 12 body.' })],
+        '2026-02-01',
+        {},
+        () => undefined,
+      );
+      const raw = new DatabaseSync(temp.indexPath);
+      raw.prepare("DELETE FROM meta WHERE key = 'title.12.issue_date'").run();
+      raw.prepare("INSERT OR REPLACE INTO meta VALUES ('issue_date', '2026-01-01')").run();
+      raw.close();
+
+      const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
+      runExportCommand(config, target, createTestLogger(), 'md');
+      const header = readFileSync(target, 'utf8').split('\n')[0];
+      expect(header).toBe('# Code of Federal Regulations — Title 12 (issue date: unknown)');
+      expect(header).not.toContain('2026-01-01');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('md export falls back to the legacy issue date for a Title 38 document', () => {
+    const temp = openTempStore({ seed: false });
+    const target = path.join(temp.dir, 'legacy38.md');
+    try {
+      // An index written before the per-title key existed: it records only
+      // the legacy `issue_date`, and the export must still date the document.
+      temp.store.replaceAll(
+        [makeSection({ citation: '4.1', text: 'Title 38 body.' })],
+        '2026-01-01',
+        { issue_date: '2026-01-01' },
+      );
+      const raw = new DatabaseSync(temp.indexPath);
+      raw.prepare("DELETE FROM meta WHERE key = 'title.38.issue_date'").run();
+      raw.close();
+
+      const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
+      runExportCommand(config, target, createTestLogger(), 'md');
+      expect(readFileSync(target, 'utf8').split('\n')[0]).toBe(
+        '# Code of Federal Regulations — Title 38 (issue date: 2026-01-01)',
       );
     } finally {
       temp.cleanup();

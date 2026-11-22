@@ -73,6 +73,10 @@ function writeJsonl(store: Store, target: string): number {
  * global `issue_date` key is Title 38's date — and only Title 38's, so it
  * is the fallback for Title 38 alone: a document holding another title must
  * not be dated with Title 38's revision.
+ *
+ * This is the RECORDED date, the same one `cfr-free verify` reports: a title
+ * whose rows exist but whose meta records none is dated "unknown", not with
+ * a date read out of the rows.
  */
 function titleIssueDate(store: Store, title: number): string {
   const perTitle = store.getMeta(`title.${title}.issue_date`);
@@ -80,14 +84,15 @@ function titleIssueDate(store: Store, title: number): string {
   return title === DEFAULT_TITLE ? (store.getMeta('issue_date') ?? 'unknown') : 'unknown';
 }
 
-/** "Title 38" for one title, "Titles 12 and 38" for several. */
+/**
+ * "Titles 12 and 38" for two titles, "Titles 12, 32 and 38" for three.
+ *
+ * The list holds at least two titles here — the empty and single-title
+ * documents are answered before this is called — so `slice` keeps both ends
+ * non-empty and neither can be undefined.
+ */
 function titleList(titles: readonly number[]): string {
-  const first = titles[0];
-  const last = titles[titles.length - 1];
-  if (titles.length === 1 || first === undefined || last === undefined) {
-    return `Title ${first ?? DEFAULT_TITLE}`;
-  }
-  return `Titles ${titles.slice(0, -1).join(', ')} and ${last}`;
+  return `Titles ${titles.slice(0, -1).join(', ')} and ${titles.slice(-1).join(', ')}`;
 }
 
 /**
@@ -121,10 +126,10 @@ function markdownHeader(store: Store, rows: readonly SectionRow[]): string {
 }
 
 /**
- * Write one Markdown document: a title header carrying the index issue
- * date, then each provision as a `## {citation} — {heading}` section with
- * its `text` verbatim (never fenced, never reflowed) and a `---` separator.
- * Returns the row count.
+ * Write one Markdown document: a header naming every title the document
+ * holds, each with that title's recorded issue date, then each provision as
+ * a `## {citation} — {heading}` section with its `text` verbatim (never
+ * fenced, never reflowed) and a `---` separator. Returns the row count.
  *
  * Same chunk-array + single-write choice (and peak) as {@link writeJsonl}.
  */

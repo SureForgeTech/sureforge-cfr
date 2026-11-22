@@ -451,8 +451,10 @@ every read names the authority it answers with:
   name. (The CLI's export is not among them: it writes every stored title's
   rows, each labeled with its own title. Its Markdown header names every
   title the document holds, each with that title's own recorded issue date —
-  a single-title document keeps the header it has always had, byte for byte.)
-  Making the surfaces above
+  the per-title key `title.<N>.issue_date`, whose legacy `issue_date` fallback
+  is Title 38's and only Title 38's. A Title 38 document therefore keeps the
+  header it has always had, byte for byte, whenever the two keys agree —
+  which is what every sync records.) Making the surfaces above
   title-scoped is a separate change.
 - `indexIssueDate` and `indexStale` describe Title 38's freshness; the
   stale-index warning's point-in-time URL names the title the answer is
