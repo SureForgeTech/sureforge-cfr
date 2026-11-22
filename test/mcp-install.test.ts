@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   clientConfigPath,
   formatMcpSnippet,
@@ -107,6 +107,56 @@ describe('mcp-install', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'removes the temp file when the write fails part-way through',
+    async () => {
+      const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-partial-'));
+      try {
+        const target = path.join(tempDir, 'mcp.json');
+        const original = '{"mcpServers":{}}\n';
+        writeFileSync(target, original, 'utf8');
+
+        // A disk that fills between the temp file's creation and its content
+        // is the case the cleanup exists for, and it cannot be reproduced
+        // portably (a real ENOSPC needs a disposable filesystem), so the one
+        // fs call that fails is substituted. Only `writeFileSync` is replaced
+        // and only for a file descriptor, which is the temp write.
+        vi.resetModules();
+        vi.doMock('node:fs', async () => {
+          const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+          return {
+            ...actual,
+            writeFileSync: (
+              file: Parameters<typeof actual.writeFileSync>[0],
+              data: Parameters<typeof actual.writeFileSync>[1],
+              options?: Parameters<typeof actual.writeFileSync>[2],
+            ): void => {
+              if (typeof file === 'number') {
+                const error = new Error(
+                  'ENOSPC: no space left on device, write',
+                ) as NodeJS.ErrnoException;
+                error.code = 'ENOSPC';
+                throw error;
+              }
+              actual.writeFileSync(file, data, options);
+            },
+          };
+        });
+        const partial = await import('../src/commands/mcp-install.js');
+
+        expect(() => partial.installClientConfig('cursor', target)).toThrow(/ENOSPC/);
+        // The config is untouched AND the half-made temp is gone: a leftover
+        // would make a later run with the same pid fail with EEXIST.
+        expect(readFileSync(target, 'utf8')).toBe(original);
+        expect(readdirSync(tempDir)).toEqual(['mcp.json']);
+      } finally {
+        vi.doUnmock('node:fs');
+        vi.resetModules();
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('refuses to clobber a config it cannot parse', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cfr-mcp-invalid-'));

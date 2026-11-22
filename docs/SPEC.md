@@ -32,7 +32,12 @@ sibling temporary file renamed into place — so an interrupted or failed write
 leaves the user's config as it was instead of half-written, and it writes
 through a symlinked config (including one whose target does not exist yet)
 rather than replacing the link, so a dotfiles setup keeps it. A config that
-is read-only is left alone and the write fails, as it did before —
+is read-only is left alone and the write fails, as it did before. Replacing
+the file in one step is a DIRECTORY operation, so it needs write permission on
+the config's directory as well as on the file: a writable config inside a
+read-only directory now fails where the in-place write would have succeeded —
+the trade for never showing a half-written file — and the config and its
+directory are left as they were;
 `cfr-free vibe rules` and `cfr-free vibe prompt` for
 pre-packaged agent system rules and claim evaluation workflows,
 `cfr-free vibe ui` for copy-paste Tailwind and React components (v0, Lovable, Cursor),

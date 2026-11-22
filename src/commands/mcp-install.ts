@@ -3,6 +3,7 @@ import {
   chmodSync,
   closeSync,
   constants,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -262,8 +263,13 @@ function writableMode(targetPath: string): number | undefined {
  * a full disk or a killed process leaves the reader with a half-written
  * client config — and this command refuses to rewrite a config it cannot
  * parse, so a torn write would leave a file it will not repair. Writing a
- * sibling temp file and renaming it into place is atomic on the same
- * filesystem: the config is either untouched or fully replaced.
+ * sibling temp file, fsync-ing it and renaming it into place is atomic on the
+ * same filesystem: the config is either untouched or fully replaced, and the
+ * bytes the rename publishes are already on the disk.
+ *
+ * The rename is a DIRECTORY operation, so replacing the file needs write
+ * permission on its directory even when the file itself is writable; that is
+ * stated in SPEC, because the old in-place write did not need it.
  *
  * `flag: 'wx'` REFUSES an existing temp path rather than opening it. Without
  * that, a pre-created symlink at the predictable temp name would redirect
@@ -293,6 +299,11 @@ function writeConfigAtomically(
     fd = openSync(tempPath, 'wx', mode ?? 0o666);
     created = true;
     writeFileSync(fd, contents, 'utf8');
+    // Get the bytes onto the disk BEFORE the rename publishes the name: a
+    // rename that commits ahead of its data leaves a power-cut reader with an
+    // empty or partial config, which is the failure this function exists to
+    // prevent. One extra fsync for a command that runs once per setup.
+    fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
     // `mode` at creation is masked by the process umask, so an existing
