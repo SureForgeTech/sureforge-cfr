@@ -449,7 +449,10 @@ every read names the authority it answers with:
   `get_section_at`) fetch Title 38's XML, and the MCP resources
   (`cfr://title38/parts`, `cfr://title38/definitions`) are Title 38's by
   name. (The CLI's export is not among them: it writes every stored title's
-  rows, each labeled with its own title.) Making the surfaces above
+  rows, each labeled with its own title. Its Markdown header names every
+  title the document holds, each with that title's own recorded issue date —
+  a single-title document keeps the header it has always had, byte for byte.)
+  Making the surfaces above
   title-scoped is a separate change.
 - `indexIssueDate` and `indexStale` describe Title 38's freshness; the
   stale-index warning's point-in-time URL names the title the answer is

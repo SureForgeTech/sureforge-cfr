@@ -207,4 +207,63 @@ describe('export command', () => {
       temp.cleanup();
     }
   });
+
+  it('md export names every title the document holds, with each title’s own date', () => {
+    const temp = openTempStore({ seed: false });
+    const target = path.join(temp.dir, 'multi.md');
+    try {
+      // A multi-title index, built the way a sync builds it: one scoped
+      // rebuild per title, each recording its own issue date.
+      temp.store.replaceTitleWithBaseline(
+        38,
+        [makeSection({ citation: '4.1', text: 'Title 38 body.' })],
+        '2026-01-01',
+        { issue_date: '2026-01-01' },
+        () => undefined,
+      );
+      temp.store.replaceTitleWithBaseline(
+        12,
+        [makeSection({ title: 12, citation: '1026.1', text: 'Title 12 body.' })],
+        '2026-02-01',
+        {},
+        () => undefined,
+      );
+
+      const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
+      const report = runExportCommand(config, target, createTestLogger(), 'md');
+      expect(report.provisions).toBe(2);
+
+      const content = readFileSync(target, 'utf8');
+      // The header names BOTH titles and BOTH dates: a document that holds
+      // two authorities is not one title at one revision.
+      expect(content.split('\n')[0]).toBe(
+        '# Code of Federal Regulations — Titles 12 and 38 (issue dates: 12 = 2026-02-01, 38 = 2026-01-01)',
+      );
+      // The per-provision labels stay as they were.
+      const headings = content.split('\n').filter((line) => line.startsWith('## '));
+      expect(headings).toContain('## 1026.1 (Title 12) — Section 1026.1 heading.');
+      expect(headings).toContain('## 4.1 — Section 4.1 heading.');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('md export names the one title it holds, and keeps the header it always had', () => {
+    const temp = openTempStore({
+      sections: [makeSection({ title: 12, citation: '1026.1', text: 'Title 12 body.' })],
+      issueDate: '2026-02-01',
+    });
+    const target = path.join(temp.dir, 'title12.md');
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
+      runExportCommand(config, target, createTestLogger(), 'md');
+      // A document that holds only Title 12 is a Title 12 document: the
+      // header must not call it Title 38.
+      expect(readFileSync(target, 'utf8').split('\n')[0]).toBe(
+        '# Code of Federal Regulations — Title 12 (issue date: 2026-02-01)',
+      );
+    } finally {
+      temp.cleanup();
+    }
+  });
 });
