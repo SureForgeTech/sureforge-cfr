@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -267,6 +277,148 @@ describe('runVerifyCommand', () => {
       expect(positional.message).not.toMatch(/cannot open index at/);
       expect(positional.message).not.toContain(dir);
       expect(positional.message).not.toMatch(/SQLITE|database disk/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a path that is not a regular file, before SQLite opens it', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      // A directory is not an index file, and SQLite cannot open one.
+      const directory = path.join(dir, 'directory.sqlite');
+      mkdirSync(directory);
+      const error = captureServiceError(() =>
+        runVerifyCommand(config, createTestLogger(), directory),
+      );
+      expect(error.code).toBe('invalid_input');
+      expect(error.message).toMatch(/not a regular file/);
+      // The configured index path is checked the same way.
+      const configured = loadConfig({ CFR_INDEX_PATH: directory });
+      const configuredError = captureServiceError(() =>
+        runVerifyCommand(configured, createTestLogger()),
+      );
+      expect(configuredError.message).toMatch(/not a regular file/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a FIFO before SQLite opens it', (ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      // A FIFO is the case that matters: SQLite's SYNCHRONOUS open blocks on
+      // one, so the command would wait forever for a writer that never comes.
+      // The refusal has to happen BEFORE the open. The writer below keeps the
+      // pipe from blocking if the guard is ever removed, so a regression fails
+      // this test instead of hanging it.
+      const fifo = path.join(dir, 'fifo.sqlite');
+      const made = spawnSync('mkfifo', [fifo]);
+      if (made.status !== 0) {
+        // No `mkfifo` on this machine: say so instead of quietly not running
+        // the case that matters.
+        ctx.skip();
+        return;
+      }
+      const writer = spawn('sh', ['-c', `head -c 100 /dev/zero > "${fifo}"`], { stdio: 'ignore' });
+      try {
+        const fifoError = captureServiceError(() =>
+          runVerifyCommand(config, createTestLogger(), fifo),
+        );
+        expect(fifoError.code).toBe('invalid_input');
+        expect(fifoError.message).toMatch(/not a regular file/);
+      } finally {
+        writer.kill();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tells a path that cannot be there from one that cannot be inspected', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      // A path whose parent component is a regular file cannot name an index
+      // at all: that is "not there", not "cannot be read".
+      const plain = path.join(dir, 'plain.sqlite');
+      writeFileSync(plain, 'not a database');
+      const missingError = captureServiceError(() =>
+        runVerifyCommand(config, createTestLogger(), path.join(plain, 'child.sqlite')),
+      );
+      expect(missingError.code).toBe('invalid_input');
+      expect(missingError.message).toMatch(/no index or snapshot here/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a path that cannot be inspected', (ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      // A path nobody may inspect might be there and could not be read: the
+      // detail goes to the log, the reader gets guidance. (Root reads
+      // everything and Windows has no POSIX permissions, so the case is
+      // skipped there — and says so.)
+      if (process.platform === 'win32' || process.getuid?.() === 0) {
+        ctx.skip();
+        return;
+      }
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      const locked = path.join(dir, 'locked');
+      mkdirSync(locked);
+      const hidden = path.join(locked, 'hidden.sqlite');
+      writeFileSync(hidden, 'not a database');
+      chmodSync(locked, 0o000);
+      const logger = createTestLogger();
+      try {
+        const unreadableError = captureServiceError(() => runVerifyCommand(config, logger, hidden));
+        expect(unreadableError.code).toBe('invalid_input');
+        expect(unreadableError.message).toMatch(/cannot be read/);
+        // The reader's line carries no path and no raw errno.
+        expect(unreadableError.message).not.toContain(dir);
+        expect(unreadableError.message).not.toMatch(/EACCES|permission denied/i);
+        // The detail is in the log.
+        expect(logger.records).toContainEqual({
+          level: 'warn',
+          message: 'verification could not inspect the file',
+          fields: { path: hidden, detail: expect.any(String) },
+        });
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lists the causes an open can fail for, not a single false one', (ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-verify-'));
+    try {
+      // A file whose own permissions deny reading it IS a regular file, so
+      // the OPEN is what refuses it. The reader must be given every cause an
+      // open can have — not one cause asserted as fact.
+      if (process.platform === 'win32' || process.getuid?.() === 0) {
+        ctx.skip();
+        return;
+      }
+      const config = loadConfig({ CFR_INDEX_PATH: path.join(dir, 'missing.sqlite') });
+      const locked = path.join(dir, 'locked.sqlite');
+      writeFileSync(locked, 'not a database');
+      chmodSync(locked, 0o000);
+      try {
+        const error = captureServiceError(() =>
+          runVerifyCommand(config, createTestLogger(), locked),
+        );
+        expect(error.code).toBe('invalid_input');
+        expect(error.message).toMatch(
+          /missing, unreadable, locked, has journal sidecars, or is not a cfr-free index/,
+        );
+      } finally {
+        chmodSync(locked, 0o600);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
