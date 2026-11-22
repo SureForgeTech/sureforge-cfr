@@ -5,8 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
+import { formatSnapshotComparison } from '../src/commands/compare.js';
 import { ServiceError } from '../src/core/errors.js';
-import { compareSnapshots, SNAPSHOT_RESPONSE_CHAR_BUDGET } from '../src/core/snapshot-compare.js';
+import {
+  compareSnapshots,
+  SNAPSHOT_RESPONSE_CHAR_BUDGET,
+  type SnapshotChange,
+} from '../src/core/snapshot-compare.js';
 import { Store } from '../src/core/store.js';
 import type { RawSection } from '../src/core/xml.js';
 import { createTestLogger, makeSection } from './helpers.js';
@@ -333,6 +338,50 @@ describe('compareSnapshots', () => {
       // The changed list spent a few characters of its OWN share and kept its
       // entry: a shared pool would spend the pool on the added list.
       expect(result.changed.map((change) => change.citation)).toEqual(['4.1']);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('says where a retitle beyond the heading bound is', () => {
+    const fixture = snapshotDir();
+    try {
+      // Two headings that share their first 1,000 characters and differ
+      // after them: both clip to the SAME string, so the pair on the wire
+      // shows nothing. The retitle is still true, and the CLI says where
+      // the difference is.
+      const shared = `Heading ${'x'.repeat(1_100)}`;
+      const from = path.join(fixture.dir, 'from.sqlite');
+      const to = path.join(fixture.dir, 'to.sqlite');
+      writeSnapshot(
+        from,
+        [makeSection({ citation: '4.1', heading: `${shared} FROM`, text: 'Body.' })],
+        FROM_DATE,
+      );
+      writeSnapshot(
+        to,
+        [makeSection({ citation: '4.1', heading: `${shared} TO`, text: 'Body.' })],
+        TO_DATE,
+      );
+
+      const change = compareSnapshots({ logger: createTestLogger() }, from, to).changed[0];
+      expect(change?.headingChanged).toBe(true);
+      // The bound holds, and the pair is identical — the case the wire has
+      // to account for.
+      expect(change?.heading.length).toBe(1_001);
+      expect(change?.heading).toBe(change?.previousHeading);
+
+      // The CLI does not print the same string twice and say nothing.
+      const printed = formatSnapshotComparison({
+        from: { path: from, issueDate: FROM_DATE },
+        to: { path: to, issueDate: TO_DATE },
+        part: null,
+        added: [],
+        removed: [],
+        changed: [change as SnapshotChange],
+        truncated: false,
+      });
+      expect(printed).toContain('the retitle lies beyond the heading bound');
     } finally {
       fixture.cleanup();
     }

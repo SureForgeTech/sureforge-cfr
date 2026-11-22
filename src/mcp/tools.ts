@@ -320,10 +320,17 @@ const snapshotChangeSchema = z.object({
   kind: z.enum(['section', 'appendix']),
   heading: z
     .string()
-    .describe('the provision’s heading, bounded at 1,000 characters (a cut heading ends with "…")'),
+    .describe(
+      'the provision’s heading, bounded at 1,000 characters (a cut heading ends with "…"); ' +
+        'when a retitle’s difference lies beyond the bound the two headings are identical on ' +
+        'the wire and `headingChanged` is the only signal',
+    ),
   headingChanged: z
     .boolean()
-    .describe('true when the provision was retitled — possibly with an unchanged body'),
+    .describe(
+      'true when the provision was retitled — possibly with an unchanged body; decided on the ' +
+        'raw headings, so it stays true when the difference lies beyond the heading bound',
+    ),
   previousHeading: z
     .string()
     .nullable()
