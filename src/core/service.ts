@@ -189,7 +189,10 @@ const citationInputSchema = z.string().trim().min(1).max(120);
 
 const browseInputSchema = z.object({
   chapter: z.string().trim().min(1).max(20).optional(),
-  part: z.string().trim().min(1).max(20).optional(),
+  // The structure tree keys parts by their canonical spelling, so a legal
+  // zero-padded filter ("04") would match no node and answer "no such
+  // part" for the part it names. Same rule as search and compare.
+  part: z.string().trim().min(1).max(20).transform(normalizePartNumber).optional(),
   subpart: z.string().trim().min(1).max(20).optional(),
   // A subject group's identifier is the eCFR's own node id (e.g.
   // "ECFRd158704dcab040e") — 18 chars in the 2026-10-16 corpus.
