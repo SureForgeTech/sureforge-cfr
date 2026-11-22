@@ -67,19 +67,77 @@ function writeJsonl(store: Store, target: string): number {
 }
 
 /**
- * Write one Markdown document: a title header carrying the index issue
- * date, then each provision as a `## {citation} — {heading}` section with
- * its `text` verbatim (never fenced, never reflowed) and a `---` separator.
- * Returns the row count.
+ * The issue date one title was recorded at.
+ *
+ * The per-title key (`title.<N>.issue_date`) is the title's own. The legacy
+ * global `issue_date` key is Title 38's date — and only Title 38's, so it
+ * is the fallback for Title 38 alone: a document holding another title must
+ * not be dated with Title 38's revision.
+ *
+ * This is the RECORDED date, the same one `cfr-free verify` reports: a title
+ * whose rows exist but whose meta records none is dated "unknown", not with
+ * a date read out of the rows.
+ */
+function titleIssueDate(store: Store, title: number): string {
+  const perTitle = store.getMeta(`title.${title}.issue_date`);
+  if (perTitle !== null) return perTitle;
+  return title === DEFAULT_TITLE ? (store.getMeta('issue_date') ?? 'unknown') : 'unknown';
+}
+
+/**
+ * "Titles 12 and 38" for two titles, "Titles 12, 32 and 38" for three.
+ *
+ * The list holds at least two titles here — the empty and single-title
+ * documents are answered before this is called — so `slice` keeps both ends
+ * non-empty and neither can be undefined.
+ */
+function titleList(titles: readonly number[]): string {
+  return `Titles ${titles.slice(0, -1).join(', ')} and ${titles.slice(-1).join(', ')}`;
+}
+
+/**
+ * The Markdown document header: the titles the document holds, and the date
+ * each of them was recorded at.
+ *
+ * The export writes EVERY stored title's rows, so a header that named one
+ * title — and one date — would describe a multi-title document as a single
+ * revision. The titles come from the rows themselves.
+ *
+ * A document holding only Title 38 keeps the header it has always had
+ * whenever the two date keys agree — which is what every sync records; a
+ * document holding another title names that title, and a document holding
+ * several names them all.
+ */
+function markdownHeader(store: Store, rows: readonly SectionRow[]): string {
+  const titles = [...new Set(rows.map((row) => row.title))].sort((a, b) => a - b);
+  const first = titles[0];
+  if (first === undefined) {
+    // No rows: there is no title to name, so the legacy line stands.
+    return `# Code of Federal Regulations — Title ${DEFAULT_TITLE} (issue date: ${
+      store.getMeta('issue_date') ?? 'unknown'
+    })\n`;
+  }
+  if (titles.length === 1) {
+    return `# Code of Federal Regulations — Title ${first} (issue date: ${titleIssueDate(
+      store,
+      first,
+    )})\n`;
+  }
+  const dates = titles.map((title) => `${title} = ${titleIssueDate(store, title)}`).join(', ');
+  return `# Code of Federal Regulations — ${titleList(titles)} (issue dates: ${dates})\n`;
+}
+
+/**
+ * Write one Markdown document: a header naming every title the document
+ * holds, each with that title's recorded issue date, then each provision as
+ * a `## {citation} — {heading}` section with its `text` verbatim (never
+ * fenced, never reflowed) and a `---` separator. Returns the row count.
  *
  * Same chunk-array + single-write choice (and peak) as {@link writeJsonl}.
  */
 function writeMarkdown(store: Store, target: string): number {
-  const issueDate = store.getMeta('issue_date') ?? 'unknown';
   const rows = store.allSections();
-  const chunks: string[] = [
-    `# Code of Federal Regulations — Title 38 (issue date: ${issueDate})\n`,
-  ];
+  const chunks: string[] = [markdownHeader(store, rows)];
   for (const row of rows) {
     // Exactly one newline joins text to the separator: append only when the
     // stored text does not already end in one (verbatim either way).
