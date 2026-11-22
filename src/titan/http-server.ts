@@ -58,11 +58,13 @@ const API_INDEX_PATH = '/api/v1';
 const OPENAPI_PATH = '/openapi.yaml';
 
 // Router-level request-size caps, enforced before validation: zod already
-// bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 3 digits, so
-// these only kill pathological requests (megabyte URLs) one layer earlier.
+// bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 20 chars
+// (≤ 80 UTF-8 bytes), so these only kill pathological requests (megabyte
+// URLs) one layer earlier. The schema, not this guard, is the contract — a
+// cap tighter than the schema's turns a documented request into a 400.
 const MAX_URL_BYTES = 2048;
 const MAX_QUERY_BYTES = 800;
-const MAX_PART_BYTES = 10;
+const MAX_PART_BYTES = 80;
 /** Default {@link HttpServerOptions.maxConcurrentUpstream}: 4 concurrent eCFR-fetching handlers. */
 const DEFAULT_MAX_CONCURRENT_UPSTREAM = 4;
 

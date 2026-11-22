@@ -576,10 +576,16 @@ describe('Titan HTTP request-size caps', () => {
     expect(paramResponse.status).toBe(400);
     expect(((await paramResponse.json()) as Json)['error']).toBe('invalid_input');
 
-    // oversized part parameter
-    const partResponse = await fetch(`${base}/api/v1/search?q=mental&part=${'1'.repeat(20)}`);
+    // oversized part parameter: past the byte cap, so the router answers
+    // before the schema sees it
+    const partResponse = await fetch(`${base}/api/v1/search?q=mental&part=${'1'.repeat(100)}`);
     expect(partResponse.status).toBe(400);
     expect(((await partResponse.json()) as Json)['message']).toContain('part exceeds');
+
+    // A part within the documented 20-char limit is the schema's to judge,
+    // not the byte cap's: an unresolvable one is a 404, never a 400.
+    const longPart = await fetch(`${base}/api/v1/browse?chapter=I&part=${'1'.repeat(20)}`);
+    expect(longPart.status).toBe(404);
 
     // whole URL above 2048 bytes → 414 before validation
     const hugeResponse = await fetch(`${base}/api/v1/search?q=${'y'.repeat(3000)}`);
