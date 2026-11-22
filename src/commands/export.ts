@@ -103,8 +103,10 @@ function titleList(titles: readonly number[]): string {
  * title — and one date — would describe a multi-title document as a single
  * revision. The titles come from the rows themselves.
  *
- * A single-title document keeps the header it has always had, byte for byte:
- * a pipeline consumer may parse it.
+ * A document holding only Title 38 keeps the header it has always had
+ * whenever the two date keys agree — which is what every sync records; a
+ * document holding another title names that title, and a document holding
+ * several names them all.
  */
 function markdownHeader(store: Store, rows: readonly SectionRow[]): string {
   const titles = [...new Set(rows.map((row) => row.title))].sort((a, b) => a - b);

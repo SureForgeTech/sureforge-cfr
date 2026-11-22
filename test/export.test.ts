@@ -322,4 +322,29 @@ describe('export command', () => {
       temp.cleanup();
     }
   });
+
+  it('md export dates a Title 38 document "unknown" when the index records none', () => {
+    const temp = openTempStore({ seed: false });
+    const target = path.join(temp.dir, 'undated38.md');
+    try {
+      // Rows but no recorded date at all: neither the per-title key nor the
+      // legacy one. The document says so rather than inventing a date.
+      temp.store.replaceAll(
+        [makeSection({ citation: '4.1', text: 'Title 38 body.' })],
+        '2026-01-01',
+        {},
+      );
+      const raw = new DatabaseSync(temp.indexPath);
+      raw.prepare("DELETE FROM meta WHERE key IN ('title.38.issue_date', 'issue_date')").run();
+      raw.close();
+
+      const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
+      runExportCommand(config, target, createTestLogger(), 'md');
+      expect(readFileSync(target, 'utf8').split('\n')[0]).toBe(
+        '# Code of Federal Regulations — Title 38 (issue date: unknown)',
+      );
+    } finally {
+      temp.cleanup();
+    }
+  });
 });
