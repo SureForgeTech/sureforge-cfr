@@ -7,11 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { formatSnapshotComparison } from '../src/commands/compare.js';
 import { ServiceError } from '../src/core/errors.js';
-import {
-  compareSnapshots,
-  SNAPSHOT_RESPONSE_CHAR_BUDGET,
-  type SnapshotChange,
-} from '../src/core/snapshot-compare.js';
+import { compareSnapshots, SNAPSHOT_RESPONSE_CHAR_BUDGET } from '../src/core/snapshot-compare.js';
 import { Store } from '../src/core/store.js';
 import type { RawSection } from '../src/core/xml.js';
 import { createTestLogger, makeSection } from './helpers.js';
@@ -364,7 +360,8 @@ describe('compareSnapshots', () => {
         TO_DATE,
       );
 
-      const change = compareSnapshots({ logger: createTestLogger() }, from, to).changed[0];
+      const comparison = compareSnapshots({ logger: createTestLogger() }, from, to);
+      const change = comparison.changed[0];
       expect(change?.headingChanged).toBe(true);
       // The bound holds, and the pair is identical — the case the wire has
       // to account for.
@@ -372,16 +369,44 @@ describe('compareSnapshots', () => {
       expect(change?.heading).toBe(change?.previousHeading);
 
       // The CLI does not print the same string twice and say nothing.
-      const printed = formatSnapshotComparison({
-        from: { path: from, issueDate: FROM_DATE },
-        to: { path: to, issueDate: TO_DATE },
-        part: null,
-        added: [],
-        removed: [],
-        changed: [change as SnapshotChange],
-        truncated: false,
-      });
-      expect(printed).toContain('the retitle lies beyond the heading bound');
+      expect(formatSnapshotComparison(comparison)).toContain(
+        'the retitle lies beyond the heading bound',
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('treats a heading of exactly the bound as cut', () => {
+    const fixture = snapshotDir();
+    try {
+      // The boundary: one heading is exactly the bound and the other is one
+      // character longer, sharing that bound. The cut is UNIFORM, so the
+      // pair is identical and the CLI says where the difference is — a
+      // heading kept whole at the bound would differ from a cut one by the
+      // ellipsis alone, which says nothing.
+      const shared = 'x'.repeat(1_000);
+      const from = path.join(fixture.dir, 'from.sqlite');
+      const to = path.join(fixture.dir, 'to.sqlite');
+      writeSnapshot(
+        from,
+        [makeSection({ citation: '4.1', heading: shared, text: 'Body.' })],
+        FROM_DATE,
+      );
+      writeSnapshot(
+        to,
+        [makeSection({ citation: '4.1', heading: `${shared}B`, text: 'Body.' })],
+        TO_DATE,
+      );
+
+      const comparison = compareSnapshots({ logger: createTestLogger() }, from, to);
+      const change = comparison.changed[0];
+      expect(change?.headingChanged).toBe(true);
+      expect(change?.heading).toBe(change?.previousHeading);
+      expect(change?.heading.length).toBe(1_001);
+      expect(formatSnapshotComparison(comparison)).toContain(
+        'the retitle lies beyond the heading bound',
+      );
     } finally {
       fixture.cleanup();
     }

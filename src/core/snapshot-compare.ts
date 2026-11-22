@@ -96,13 +96,17 @@ export const HEADING_CHARS = 1_000;
 /**
  * Clip a heading at the bound; a cut heading is marked with an ellipsis.
  *
- * Two headings that share their first {@link HEADING_CHARS} characters clip
- * to the SAME string, even though they differ: a retitle whose difference
- * lies beyond the bound is then visible only as `headingChanged`, which is
- * decided on the RAW headings. The wire says so, and so does the CLI.
+ * The cut is UNIFORM: a heading of {@link HEADING_CHARS} characters is cut
+ * too, not kept whole. That matters because two headings that share their
+ * first {@link HEADING_CHARS} characters must clip to the SAME string — with
+ * a uniform cut they do, so "the two clipped headings are identical" means
+ * exactly one thing: the retitle's difference lies beyond the bound. (A
+ * heading of exactly the bound kept whole would clip differently from a
+ * longer one and the pair would differ by the ellipsis alone, which says
+ * nothing about where the retitle is.)
  */
 function clipHeading(heading: string): string {
-  return heading.length <= HEADING_CHARS ? heading : `${heading.slice(0, HEADING_CHARS)}…`;
+  return heading.length < HEADING_CHARS ? heading : `${heading.slice(0, HEADING_CHARS)}…`;
 }
 
 /** One side of the comparison: the file and the issue date it records. */
@@ -133,8 +137,8 @@ export interface SnapshotChange {
   readonly kind: 'section' | 'appendix';
   /**
    * The heading at the to-side (the only side for an added provision),
-   * bounded at {@link HEADING_CHARS} characters — a cut heading ends with an
-   * ellipsis.
+   * bounded at {@link HEADING_CHARS} characters — a heading of that length or
+   * more is cut and ends with an ellipsis.
    */
   readonly heading: string;
   /**

@@ -321,9 +321,9 @@ const snapshotChangeSchema = z.object({
   heading: z
     .string()
     .describe(
-      'the provision’s heading, bounded at 1,000 characters (a cut heading ends with "…"); ' +
-        'when a retitle’s difference lies beyond the bound the two headings are identical on ' +
-        'the wire and `headingChanged` is the only signal',
+      'the provision’s heading, bounded at 1,000 characters; a heading of that length or more ' +
+        'is cut and ends with "…". When a retitle’s difference lies beyond the bound, the two ' +
+        'clipped headings are identical on the wire and `headingChanged` is the only signal',
     ),
   headingChanged: z
     .boolean()
@@ -334,7 +334,10 @@ const snapshotChangeSchema = z.object({
   previousHeading: z
     .string()
     .nullable()
-    .describe('the from-side heading when the provision was retitled; bounded like `heading`'),
+    .describe(
+      'the from-side heading when the provision was retitled; bounded like `heading`, and ' +
+        'therefore identical to it when the difference lies beyond the bound',
+    ),
   chapter: z.string().nullable(),
   part: z.string().nullable(),
   subpart: z.string().nullable(),

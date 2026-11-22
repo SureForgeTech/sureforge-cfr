@@ -64,8 +64,9 @@ function formatSummary(summary: ChangeSummary): string[] {
 function formatRetitle(change: SnapshotChange): string {
   const previous = change.previousHeading ?? 'unknown';
   if (previous === change.heading) {
+    const bound = HEADING_CHARS.toLocaleString('en-US');
     return (
-      `${change.heading} (previously: the same first ${HEADING_CHARS} characters — ` +
+      `${change.heading} (previously: the same first ${bound} characters — ` +
       'the retitle lies beyond the heading bound)'
     );
   }
