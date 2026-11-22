@@ -377,14 +377,14 @@ describe('compareSnapshots', () => {
     }
   });
 
-  it('treats a heading of exactly the bound as cut', () => {
+  it('treats a heading of exactly the bound as marked', () => {
     const fixture = snapshotDir();
     try {
       // The boundary: one heading is exactly the bound and the other is one
-      // character longer, sharing that bound. The cut is UNIFORM, so the
+      // character longer, sharing that bound. The marking is UNIFORM, so the
       // pair is identical and the CLI says where the difference is — a
-      // heading kept whole at the bound would differ from a cut one by the
-      // ellipsis alone, which says nothing.
+      // heading left unmarked at the bound would differ from a marked one by
+      // the ellipsis alone, which says nothing.
       const shared = 'x'.repeat(1_000);
       const from = path.join(fixture.dir, 'from.sqlite');
       const to = path.join(fixture.dir, 'to.sqlite');
